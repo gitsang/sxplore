@@ -1,50 +1,50 @@
-# Sxplore 设计文档
+# Sxplore Design
 
-## 1. 总体架构
+## 1. Architecture
 
 ```
 ┌─────────────────────────────────────────────────────┐
 │ UI (Compose)                                         │
 │  MainActivity ─ PermissionGate ─ AppRoot             │
-│    ├─ ScrollableTabRow + HorizontalPager (多 Tab)     │
-│    ├─ FileTreeScreen (层级树, LazyColumn 扁平化)       │
-│    ├─ Dialogs (连接/文件操作/传输进度)                  │
-│    └─ PlayerActivity (Media3 内置播放器)               │
+│    ├─ SxploreTabRow + HorizontalPager (multi-tab)     │
+│    ├─ FileTreeScreen (tree, flattened LazyColumn)     │
+│    ├─ Dialogs (connect / file ops / transfer)         │
+│    └─ PlayerActivity (Media3 built-in player)         │
 ├─────────────────────────────────────────────────────┤
-│ AppViewModel (状态中枢)                               │
-│  tabs / clipboard / transfer / dialog 状态            │
+│ AppViewModel (state hub)                             │
+│  tabs / clipboard / transfer / dialog state          │
 ├─────────────────────────────────────────────────────┤
-│ VFS 抽象层                                            │
-│  Vfs 接口: list/stat/openRandomAccess/openInput/      │
-│           openOutput/mkdir/delete/rename             │
-│  ├─ LocalVfs  (Environment.getExternalStorageDirectory)│
-│  └─ SmbVfs    (smbj, SMB2/3, 自动重连)                │
+│ VFS abstraction                                      │
+│  Vfs: list/stat/openRandomAccess/openInput/          │
+│       openOutput/mkdir/delete/rename                 │
+│  ├─ LocalVfs  (external storage root)                │
+│  └─ SmbVfs    (smbj, SMB2/3, auto-reconnect)          │
 ├─────────────────────────────────────────────────────┤
-│ StreamProxy (NanoHTTPD, 127.0.0.1:随机端口)           │
+│ StreamProxy (NanoHTTPD, 127.0.0.1:random port)        │
 │  HTTP Range → VfsRandomAccess.readAt(offset)         │
 ├─────────────────────────────────────────────────────┤
 │ ConnectionStore (EncryptedSharedPreferences)         │
 └─────────────────────────────────────────────────────┘
 ```
 
-## 2. 关键设计决策
+## 2. Key decisions
 
-### 2.1 为什么用本地 HTTP 代理而不是 ExoPlayer 自定义 DataSource？
+### 2.1 Why a local HTTP proxy instead of a custom ExoPlayer DataSource?
 
-自定义 `DataSource` 只能服务内置 ExoPlayer；外部播放器（MX/VLC）无法注入代码。
-本地 HTTP 代理把 SMB 随机读暴露为标准 HTTP Range 语义：
+A custom `DataSource` only serves the built-in ExoPlayer; external players (MX/VLC) cannot be injected with code.
+The local HTTP proxy exposes SMB positional reads as standard HTTP Range semantics:
 
-- 内置 ExoPlayer：`DefaultHttpDataSource` 直接消费代理 URL
-- 外部播放器：`ACTION_VIEW` + 代理 URL，任何支持 HTTP 的播放器都能流播 + seek
-- 一条链路，两种播放器，零落盘
+- Built-in ExoPlayer: `DefaultHttpDataSource` consumes the proxy URL directly
+- External players: `ACTION_VIEW` + proxy URL; any HTTP-capable player can stream and seek
+- One path, two player types, zero disk writes
 
-安全边界：
-- 仅绑定 `127.0.0.1`，局域网其他设备不可达
-- URL 含 128-bit 随机 token，不可枚举
-- token LRU 上限 32 个，播放器退出后自然淘汰
-- `network_security_config` 仅对本机回环地址放行明文 HTTP
+Security boundary:
+- Binds only to `127.0.0.1`, unreachable from other LAN devices
+- URL carries a 128-bit random token, not enumerable
+- Token LRU capped at 32; evicted naturally after the player exits
+- `network_security_config` permits cleartext HTTP only for the loopback address
 
-### 2.2 Range 请求处理
+### 2.2 Range request handling
 
 ```
 GET /s/{token}/{name}
@@ -53,47 +53,57 @@ Range: bytes=1048576-
 → 206 Partial Content
   Content-Range: bytes 1048576-{size-1}/{size}
   Content-Length: {size-1048576}
-  body: 从 offset=1048576 起流式读取 SMB
+  body: streamed from offset=1048576 over SMB
 
-支持: bytes=N- / bytes=N-M / bytes=-N (suffix)
-HEAD: 返回 Content-Length + Accept-Ranges（外部播放器探测用）
+Supports: bytes=N- / bytes=N-M / bytes=-N (suffix)
+HEAD: returns Content-Length + Accept-Ranges (external player probing)
 ```
 
-每个 HTTP 请求独占一个 `VfsRandomAccess` 句柄：
-- SMB：每请求 `openFile(GENERIC_READ)`，READ 携带绝对偏移，无共享游标，天然并发安全
-- 本地：`RandomAccessFile.seek + read`
+Each HTTP request owns a `VfsRandomAccess` handle:
+- SMB: `openFile(GENERIC_READ)` per request; READ carries an absolute offset, no shared cursor, concurrency-safe
+- Local: `RandomAccessFile.seek + read`
 
-### 2.3 树视图状态模型
+### 2.3 Tree view state model
 
-每个 Tab 一份 `TabUiState`：
-- `rootEntries` + `children: Map<path, List<VfsEntry>>`（懒加载缓存）
-- `expanded: Set<path>`（展开状态）
-- 渲染时把树扁平化为 `List<TreeRow(entry, depth)>`，交给 `LazyColumn`（key=path）
-- 展开/折叠 = 改 Set，Compose 自动重组；未加载目录点击时异步拉取
+One `TabUiState` per tab:
+- `rootEntries` + `children: Map<path, List<VfsEntry>>` (lazy-load cache)
+- `expanded: Set<path>` (expansion state)
+- At render time the tree is flattened to `List<TreeRow(entry, depth)>` for `LazyColumn` (key=path)
+- Expand/collapse = mutate the Set; Compose recomposes; unloaded folders fetch asynchronously on click
 
-### 2.4 SMB 会话管理
+### 2.4 SMB session management
 
-- 每个 Tab 独占一个 `SmbVfs`（独立会话），关 Tab 即释放
-- 操作失败 → 关闭旧会话 → 重建 → 重试一次（`withRetry`）
-- 匿名：`AuthenticationContext.ANONYMOUS`；否则用户名/密码/域
-- 凭据持久化于 EncryptedSharedPreferences（AES256-GCM），明文不落盘
+- Each tab owns a `SmbVfs` (independent session); closing the tab releases it
+- Operation fails → close old session → rebuild → retry once (`withRetry`)
+- Anonymous: `AuthenticationContext.anonymous()`; otherwise username/password/domain
+- Credentials persisted in EncryptedSharedPreferences (AES256-GCM), never plaintext
 
-### 2.5 跨源复制/移动
+### 2.5 Cross-source copy/move
 
-剪贴板模型：源（VFS + path + move 标记）→ 目标 Tab 的 `currentDir` 粘贴。
-`TransferEngine`：递归收集清单 → 逐文件流式拷贝（128KB 缓冲）→ 进度回调（1MB 节流）。
-移动 = 复制成功后删除源。
+Clipboard model: source (VFS + path + move flag) → paste into the target tab's `currentDir`.
+`TransferEngine`: recursive plan → streamed file-by-file copy (128KB buffer) → progress callback (1MB throttle).
+Move = copy, then delete source on success.
 
-## 3. 已知限制（MVP）
+### 2.6 Custom tab strip (crash fix)
 
-- 播放器退出 Activity 即停止（无后台播放/MediaSession）
-- Tab 状态不跨进程持久化
-- 目录复制为串行流式，无并发优化
-- SMB1 不支持（smbj 仅 SMB2/3；现代 NAS/Windows 均默认 SMB2+）
-- 外部播放器对 http seek 的支持取决于播放器自身（MX/VLC 已验证语义兼容）
+Material3 `ScrollableTabRow` throws `IndexOutOfBoundsException` at `TabRow.kt:502` when the tab count changes:
+its indicator reads `tabPositions[selectedTabIndex]` before the position list is re-measured for the new count
+(e.g. adding a second tab sets `selectedTabIndex=1` while `tabPositions` still has length 1).
 
-## 4. 后续扩展点
+Fix: `SxploreTabRow`, a hand-rolled `Row` + `horizontalScroll` strip. Each tab draws its own indicator from its own
+`selected` flag, so there is no shared position list to go stale. `onGloballyPositioned` records each tab's x offset
+and a `LaunchedEffect` auto-scrolls the active tab into view.
 
-- 新协议：实现 `Vfs` 接口即可（WebDAV 可用 Sardine/OkHttp，SFTP 用 sshj）
-- 双栏：`TabUiState` 拆为左右两份，共享剪贴板模型不变
-- 后台播放：迁移 PlayerActivity → MediaSessionService + Compose 控制 UI
+## 3. Known limitations (MVP)
+
+- Playback stops when the player Activity exits (no background playback / MediaSession)
+- Tab state is not persisted across process death
+- Directory copy is serial/streamed, no concurrency optimization
+- SMB1 not supported (smbj is SMB2/3 only; modern NAS/Windows default to SMB2+)
+- External-player http seek support depends on the player itself (MX/VLC semantics verified)
+
+## 4. Extension points
+
+- New protocol: implement `Vfs` (WebDAV via Sardine/OkHttp, SFTP via sshj)
+- Dual pane: split `TabUiState` into left/right; the shared clipboard model is unchanged
+- Background playback: migrate PlayerActivity → MediaSessionService + Compose control UI

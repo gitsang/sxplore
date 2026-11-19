@@ -94,9 +94,9 @@ private fun PermissionGate(content: @Composable () -> Unit) {
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text("需要文件访问权限", fontSize = 20.sp)
+            Text("File access required", fontSize = 20.sp)
             Text(
-                "Sxplore 是文件管理器，需要访问设备存储才能浏览和管理本地文件。\nSMB 网络文件不受此权限影响。",
+                "Sxplore is a file manager and needs access to device storage to browse and manage local files.\nSMB network files are not affected by this permission.",
                 fontSize = 14.sp,
                 modifier = Modifier.padding(vertical = 16.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -118,7 +118,7 @@ private fun PermissionGate(content: @Composable () -> Unit) {
                         )
                     )
                 }
-            }) { Text("授予权限") }
+            }) { Text("Grant access") }
         }
     }
 }

@@ -21,9 +21,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 import com.hierynomus.smbj.share.File as SmbFile
 
 /**
- * SMB VFS（smbj，SMB2/3）。
- * - 断线自动重连（操作失败后重建会话并重试一次）
- * - 随机读句柄按偏移读取，供流式代理使用，全程不落盘
+ * SMB VFS (smbj, SMB2/3).
+ * - Auto-reconnect: rebuild the session and retry once after a failure
+ * - Positional random-access reads for the streaming proxy, zero disk caching
  */
 class SmbVfs(val info: SmbConnectionInfo) : Vfs {
 
@@ -61,7 +61,7 @@ class SmbVfs(val info: SmbConnectionInfo) : Vfs {
         return ds
     }
 
-    /** 连接失效时重建并重试一次。 */
+    /** Rebuild the session and retry once when the connection drops. */
     private fun <T> withRetry(block: (DiskShare) -> T): T {
         return try {
             block(share())

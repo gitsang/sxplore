@@ -42,9 +42,9 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 
 /**
- * 内置播放器：Media3/ExoPlayer。
- * SMB 文件走本地代理 URL（http://127.0.0.1），本地文件走 file://，
- * 均支持拖动 seek，全程流式、零落盘。
+ * Built-in player: Media3/ExoPlayer.
+ * SMB files go through the local proxy URL (http://127.0.0.1), local files use file://.
+ * Both support seeking; fully streamed, nothing is written to disk.
  */
 class PlayerActivity : ComponentActivity() {
 
@@ -86,7 +86,7 @@ class PlayerActivity : ComponentActivity() {
         p.prepare()
         p.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
-                errorMsg = "播放失败: ${error.errorCodeName}\n${error.message}"
+                errorMsg = "Playback failed: ${error.errorCodeName}\n${error.message}"
             }
         })
         player = p
@@ -110,7 +110,7 @@ class PlayerActivity : ComponentActivity() {
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         IconButton(onClick = { finish() }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = Color.White)
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
                         }
                         Text(
                             title,
@@ -130,7 +130,7 @@ class PlayerActivity : ComponentActivity() {
                                 errorMsg = null
                                 p.prepare()
                             }, modifier = Modifier.padding(top = 12.dp)) {
-                                Text("重试")
+                                Text("Retry")
                             }
                         }
                     }

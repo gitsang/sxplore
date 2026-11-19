@@ -1,8 +1,8 @@
 package com.sxplore.app.vfs
 
 /**
- * 跨 VFS 复制引擎：递归收集 → 逐文件流式拷贝 → 进度回调。
- * 移动 = 复制 + 删除源。全程流式，不落盘中转。
+ * Cross-VFS copy engine: recursive plan -> streamed file-by-file copy -> progress callbacks.
+ * Move = copy + delete source. Fully streamed, no intermediate files on disk.
  */
 object TransferEngine {
 

@@ -45,10 +45,10 @@ import com.sxplore.app.vfs.VfsEntry
 fun NewTabDialog(vm: AppViewModel) {
     AlertDialog(
         onDismissRequest = { vm.showNewTab = false },
-        title = { Text("新建标签页") },
+        title = { Text("New tab") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                DialogRow(Icons.Filled.Storage, "本地存储") {
+                DialogRow(Icons.Filled.Storage, "Local storage") {
                     vm.showNewTab = false
                     vm.addLocalTab()
                 }
@@ -57,7 +57,7 @@ fun NewTabDialog(vm: AppViewModel) {
                         Modifier.fillMaxWidth().clickable {
                             vm.openSmbTab(info, save = false) { err ->
                                 if (err == null) vm.showNewTab = false
-                                else vm.snackbar = "连接失败: $err"
+                                else vm.snackbar = "Connection failed: $err"
                             }
                         }.padding(vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -73,18 +73,18 @@ fun NewTabDialog(vm: AppViewModel) {
                             )
                         }
                         IconButton(onClick = { vm.deleteConnection(info.id) }) {
-                            Icon(Icons.Filled.Delete, "删除连接", Modifier.size(18.dp))
+                            Icon(Icons.Filled.Delete, "Delete connection", Modifier.size(18.dp))
                         }
                     }
                 }
-                DialogRow(Icons.Filled.Dns, "新建 SMB 连接…") {
+                DialogRow(Icons.Filled.Dns, "New SMB connection…") {
                     vm.showNewTab = false
                     vm.connectInitial = SmbConnectionInfo(name = "", host = "", share = "")
                 }
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = { vm.showNewTab = false }) { Text("取消") } },
+        dismissButton = { TextButton(onClick = { vm.showNewTab = false }) { Text("Cancel") } },
     )
 }
 
@@ -119,29 +119,29 @@ fun ConnectDialog(
 
     AlertDialog(
         onDismissRequest = { if (!connecting) onDismiss() },
-        title = { Text(if (initial.id.isBlank()) "新建 SMB 连接" else "编辑 SMB 连接") },
+        title = { Text(if (initial.id.isBlank()) "New SMB connection" else "Edit SMB connection") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                OutlinedTextField(name, { name = it }, label = { Text("显示名称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(name, { name = it }, label = { Text("Display name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(host, { host = it }, label = { Text("主机 / IP *") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(host, { host = it }, label = { Text("Host / IP *") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(port, { port = it }, label = { Text("端口（默认 445）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(port, { port = it }, label = { Text("Port (default 445)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(share, { share = it }, label = { Text("共享名 *") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(share, { share = it }, label = { Text("Share name *") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(username, { username = it }, label = { Text("用户名（留空 = 匿名）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(username, { username = it }, label = { Text("Username (blank = anonymous)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
-                    password, { password = it }, label = { Text("密码") }, singleLine = true,
+                    password, { password = it }, label = { Text("Password") }, singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(domain, { domain = it }, label = { Text("域（可选）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(domain, { domain = it }, label = { Text("Domain (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(save, { save = it })
-                    Text("保存连接（凭据加密存储）", fontSize = 13.sp)
+                    Text("Save connection (credentials stored encrypted)", fontSize = 13.sp)
                 }
                 error?.let {
                     Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
@@ -172,10 +172,10 @@ fun ConnectDialog(
                         }
                     }
                 },
-            ) { Text(if (connecting) "连接中…" else "连接") }
+            ) { Text(if (connecting) "Connecting…" else "Connect") }
         },
         dismissButton = {
-            TextButton(enabled = !connecting, onClick = onDismiss) { Text("取消") }
+            TextButton(enabled = !connecting, onClick = onDismiss) { Text("Cancel") }
         },
     )
 }
@@ -199,20 +199,20 @@ fun FileActionsDialog(
         text = {
             Column {
                 if (media) {
-                    ActionItem("▶ 内置播放（流式）", onPlayInternal)
-                    ActionItem("↗ 外部播放器（流式）", onPlayExternal)
+                    ActionItem("▶ Play built-in (streaming)", onPlayInternal)
+                    ActionItem("↗ External player (streaming)", onPlayExternal)
                 } else {
-                    ActionItem("↗ 用其他应用打开", onPlayExternal)
+                    ActionItem("↗ Open with another app", onPlayExternal)
                 }
-                ActionItem("复制", onCopy)
-                ActionItem("剪切（移动）", onCut)
-                ActionItem("重命名", onRename)
-                ActionItem("删除", onDelete)
-                ActionItem("属性", onInfo)
+                ActionItem("Copy", onCopy)
+                ActionItem("Cut (move)", onCut)
+                ActionItem("Rename", onRename)
+                ActionItem("Delete", onDelete)
+                ActionItem("Properties", onInfo)
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
@@ -230,14 +230,14 @@ fun DirActionsDialog(
         title = { Text(entry.name, fontSize = 16.sp, maxLines = 2) },
         text = {
             Column {
-                ActionItem("新建子文件夹", onNewFolder)
-                ActionItem("刷新", onRefresh)
-                ActionItem("重命名", onRename)
-                ActionItem("删除", onDelete)
+                ActionItem("New subfolder", onNewFolder)
+                ActionItem("Refresh", onRefresh)
+                ActionItem("Rename", onRename)
+                ActionItem("Delete", onDelete)
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
@@ -255,16 +255,16 @@ fun RenameDialog(entry: VfsEntry, onDismiss: () -> Unit, onConfirm: (String) -> 
     var name by remember { mutableStateOf(entry.name) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("重命名") },
+        title = { Text("Rename") },
         text = {
             OutlinedTextField(name, { name = it }, singleLine = true, modifier = Modifier.fillMaxWidth())
         },
         confirmButton = {
             TextButton(enabled = name.isNotBlank() && name != entry.name, onClick = { onConfirm(name.trim()) }) {
-                Text("确定")
+                Text("OK")
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
@@ -273,14 +273,14 @@ fun NewFolderDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var name by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("新建文件夹") },
+        title = { Text("New folder") },
         text = {
             OutlinedTextField(name, { name = it }, singleLine = true, modifier = Modifier.fillMaxWidth())
         },
         confirmButton = {
-            TextButton(enabled = name.isNotBlank(), onClick = { onConfirm(name.trim()) }) { Text("创建") }
+            TextButton(enabled = name.isNotBlank(), onClick = { onConfirm(name.trim()) }) { Text("Create") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
@@ -288,14 +288,14 @@ fun NewFolderDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
 fun DeleteConfirmDialog(entry: VfsEntry, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("删除确认") },
+        title = { Text("Delete confirmation") },
         text = {
-            Text("确定删除「${entry.name}」？${if (entry.isDir) "文件夹及其全部内容将被递归删除，" else ""}此操作不可恢复。")
+            Text("Delete \"${entry.name}\"? ${if (entry.isDir) "The folder and all its contents will be deleted recursively. " else ""}This cannot be undone.")
         },
         confirmButton = {
-            TextButton(onClick = onConfirm) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            TextButton(onClick = onConfirm) { Text("Delete", color = MaterialTheme.colorScheme.error) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
@@ -303,17 +303,17 @@ fun DeleteConfirmDialog(entry: VfsEntry, onDismiss: () -> Unit, onConfirm: () ->
 fun InfoDialog(entry: VfsEntry, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("属性", fontSize = 18.sp) },
+        title = { Text("Properties", fontSize = 18.sp) },
         text = {
             Column {
-                InfoLine("名称", entry.name)
-                InfoLine("路径", entry.path)
-                InfoLine("类型", if (entry.isDir) "文件夹" else StreamProxy.mimeOf(entry.name))
-                if (!entry.isDir) InfoLine("大小", "${formatSize(entry.size)} (${entry.size} 字节)")
-                InfoLine("修改时间", formatDate(entry.lastModified))
+                InfoLine("Name", entry.name)
+                InfoLine("Path", entry.path)
+                InfoLine("Type", if (entry.isDir) "Folder" else StreamProxy.mimeOf(entry.name))
+                if (!entry.isDir) InfoLine("Size", "${formatSize(entry.size)} (${entry.size} bytes)")
+                InfoLine("Modified", formatDate(entry.lastModified))
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
 }
 

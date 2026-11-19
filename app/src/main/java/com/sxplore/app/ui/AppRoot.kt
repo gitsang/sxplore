@@ -1,44 +1,54 @@
 package com.sxplore.app.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sxplore.app.vfs.VfsPaths
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -71,40 +81,12 @@ fun AppRoot(vm: AppViewModel) {
                             vm.refreshConnections()
                             vm.showNewTab = true
                         }) {
-                            Icon(Icons.Filled.Add, "新建标签页")
+                            Icon(Icons.Filled.Add, "New tab")
                         }
                     },
                 )
-                ScrollableTabRow(
-                    selectedTabIndex = vm.activeIndex.coerceIn(0, (vm.tabs.size - 1).coerceAtLeast(0)),
-                    edgePadding = 0.dp,
-                ) {
-                    vm.tabs.forEachIndexed { i, tab ->
-                        Tab(
-                            selected = i == vm.activeIndex,
-                            onClick = { vm.activeIndex = i },
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        tab.title,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.widthIn(max = 140.dp),
-                                        fontSize = 13.sp,
-                                    )
-                                    Spacer(Modifier.width(4.dp))
-                                    Icon(
-                                        Icons.Filled.Close, "关闭标签页",
-                                        Modifier
-                                            .size(14.dp)
-                                            .clickable { vm.closeTab(i) },
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            },
-                        )
-                    }
-                }
+                SxploreTabRow(vm)
+                HorizontalDivider(thickness = 0.5.dp)
             }
         },
         bottomBar = {
@@ -118,15 +100,15 @@ fun AppRoot(vm: AppViewModel) {
                             Icon(Icons.Filled.ContentPaste, null, Modifier.size(16.dp))
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                "${if (op.move) "移动" else "复制"}: ${VfsPaths.name(op.srcPath)}",
+                                "${if (op.move) "Move" else "Copy"}: ${VfsPaths.name(op.srcPath)}",
                                 Modifier.weight(1f),
                                 fontSize = 12.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            TextButton(onClick = { vm.paste() }) { Text("粘贴到当前目录") }
+                            TextButton(onClick = { vm.paste() }) { Text("Paste here") }
                             IconButton(onClick = { vm.clipboard = null }) {
-                                Icon(Icons.Filled.Close, "清除剪贴板", Modifier.size(16.dp))
+                                Icon(Icons.Filled.Close, "Clear clipboard", Modifier.size(16.dp))
                             }
                         }
                     }
@@ -142,7 +124,7 @@ fun AppRoot(vm: AppViewModel) {
         }
     }
 
-    // ---------- 对话框 ----------
+    // ---------- Dialogs ----------
 
     if (vm.showNewTab) {
         NewTabDialog(vm)
@@ -202,5 +184,81 @@ fun AppRoot(vm: AppViewModel) {
     }
     vm.transfer?.let { t ->
         TransferDialog(t)
+    }
+}
+
+/**
+ * Custom scrollable tab strip.
+ *
+ * Replaces Material3 ScrollableTabRow, which crashes with
+ * IndexOutOfBoundsException (TabRow.kt:502) when the tab count changes:
+ * its indicator reads tabPositions[selectedTabIndex] before the position
+ * list is re-measured for the new count. Here each tab draws its own
+ * indicator from its own selected flag, so no shared list can go stale.
+ */
+@Composable
+private fun SxploreTabRow(vm: AppViewModel) {
+    val scrollState = rememberScrollState()
+    val tabOffsets = remember { mutableStateMapOf<Int, Int>() }
+
+    // Keep the active tab visible when selection changes or tabs are added/removed.
+    LaunchedEffect(vm.activeIndex, vm.tabs.size, tabOffsets[vm.activeIndex]) {
+        tabOffsets[vm.activeIndex]?.let { x ->
+            scrollState.animateScrollTo(x.coerceAtLeast(0))
+        }
+    }
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(scrollState),
+    ) {
+        vm.tabs.forEachIndexed { i, tab ->
+            val selected = i == vm.activeIndex
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .onGloballyPositioned { coords ->
+                        tabOffsets[i] = coords.positionInParent().x.roundToInt()
+                    }
+                    .clickable { vm.activeIndex = i }
+                    .width(IntrinsicSize.Max),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                ) {
+                    Text(
+                        tab.title,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 140.dp),
+                        fontSize = 13.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Icon(
+                        Icons.Filled.Close, "Close tab",
+                        Modifier
+                            .size(14.dp)
+                            .clickable { vm.closeTab(i) },
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(2.dp)
+                        .background(
+                            if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
+                        ),
+                )
+            }
+        }
     }
 }

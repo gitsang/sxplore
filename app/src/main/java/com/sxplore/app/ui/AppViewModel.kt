@@ -56,7 +56,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var snackbar by mutableStateOf<String?>(null)
     var savedConnections by mutableStateOf<List<SmbConnectionInfo>>(emptyList())
 
-    // 对话框状态
+    // Dialog state
     var showNewTab by mutableStateOf(false)
     var connectInitial by mutableStateOf<SmbConnectionInfo?>(null)
     var fileAction by mutableStateOf<Pair<Int, VfsEntry>?>(null)
@@ -70,10 +70,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         refreshConnections()
-        addTab(container.newLocalVfs(), "本地存储")
+        addTab(container.newLocalVfs(), "Local storage")
     }
 
-    // ---------- Tab 管理 ----------
+    // ---------- Tab management ----------
 
     private fun addTab(vfs: Vfs, title: String) {
         tabs.add(TabUiState(id = nextId++, title = title, vfs = vfs))
@@ -81,7 +81,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         loadRoot(tabs.lastIndex)
     }
 
-    fun addLocalTab() = addTab(container.newLocalVfs(), "本地存储")
+    fun addLocalTab() = addTab(container.newLocalVfs(), "Local storage")
 
     fun openSmbTab(info: SmbConnectionInfo, save: Boolean, onDone: (error: String?) -> Unit) {
         viewModelScope.launch {
@@ -102,7 +102,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 onDone(null)
             } catch (e: Exception) {
                 runCatching { vfs.close() }
-                onDone(e.message ?: "连接失败")
+                onDone(e.message ?: "Connection failed")
             }
         }
     }
@@ -127,7 +127,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         refreshConnections()
     }
 
-    // ---------- 树加载 ----------
+    // ---------- Tree loading ----------
 
     private fun update(index: Int, f: (TabUiState) -> TabUiState) {
         if (index in tabs.indices) tabs[index] = f(tabs[index])
@@ -144,7 +144,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: Exception) {
                 update(index) {
-                    it.copy(rootLoaded = true, rootError = e.message ?: "加载失败", loading = it.loading - "/")
+                    it.copy(rootLoaded = true, rootError = e.message ?: "Failed to load", loading = it.loading - "/")
                 }
             }
         }
@@ -171,7 +171,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: Exception) {
                 update(index) { it.copy(loading = it.loading - path, expanded = it.expanded - path) }
-                snackbar = "加载失败: ${e.message}"
+                snackbar = "Load failed: ${e.message}"
             }
         }
     }
@@ -203,14 +203,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return out
     }
 
-    // ---------- 播放 ----------
+    // ---------- Playback ----------
 
     private fun streamUrl(index: Int, e: VfsEntry): String {
         val tab = tabs[index]
         return when (val vfs = tab.vfs) {
             is SmbVfs -> container.proxy.register(vfs, e.path, e.size, e.name)
             is LocalVfs -> Uri.fromFile(vfs.realFile(e.path)).toString()
-            else -> throw IllegalStateException("不支持的文件源")
+            else -> throw IllegalStateException("Unsupported file source")
         }
     }
 
@@ -223,7 +223,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
         } catch (ex: Exception) {
-            snackbar = "无法播放: ${ex.message}"
+            snackbar = "Cannot play: ${ex.message}"
         }
     }
 
@@ -244,18 +244,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         try {
             ctx.startActivity(
-                Intent.createChooser(intent, "选择播放器").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                Intent.createChooser(intent, "Choose a player").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
         } catch (ex: ActivityNotFoundException) {
-            snackbar = "未找到可用的播放器"
+            snackbar = "No player app found"
         }
     }
 
-    // ---------- 文件操作 ----------
+    // ---------- File operations ----------
 
     fun setClipboard(index: Int, e: VfsEntry, move: Boolean) {
         clipboard = ClipboardOp(tabs[index].vfs, e.path, move)
-        snackbar = if (move) "已剪切: ${e.name}，到目标目录后点粘贴" else "已复制: ${e.name}，到目标目录后点粘贴"
+        snackbar = if (move) "Cut: ${e.name} — open a destination folder and tap Paste" else "Copied: ${e.name} — open a destination folder and tap Paste"
     }
 
     fun paste() {
@@ -264,15 +264,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val tab = tabs.getOrNull(idx) ?: return
         val destDir = tab.currentDir
         if (op.srcVfs.id == tab.vfs.id && VfsPaths.parent(op.srcPath) == destDir) {
-            snackbar = "源目录与目标目录相同"
+            snackbar = "Source and destination folders are the same"
             return
         }
         viewModelScope.launch {
-            transfer = TransferProgress("准备中…", 0, 0)
+            transfer = TransferProgress("Preparing…", 0, 0)
             try {
                 withContext(Dispatchers.IO) {
                     TransferEngine.copy(op.srcVfs, op.srcPath, tab.vfs, destDir) { done, total ->
-                        transfer = TransferProgress(if (op.move) "移动中" else "复制中", done, total)
+                        transfer = TransferProgress(if (op.move) "Moving" else "Copying", done, total)
                     }
                 }
                 if (op.move) {
@@ -281,9 +281,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     tabs.forEachIndexed { i, t -> if (t.vfs.id == op.srcVfs.id) refreshAll(i) }
                 }
                 refreshDir(idx, destDir)
-                snackbar = "传输完成"
+                snackbar = "Transfer complete"
             } catch (e: Exception) {
-                snackbar = "传输失败: ${e.message}"
+                snackbar = "Transfer failed: ${e.message}"
             } finally {
                 transfer = null
             }
@@ -299,9 +299,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     it.copy(expanded = it.expanded - e.path, children = it.children - e.path)
                 }
                 refreshDir(index, VfsPaths.parent(e.path))
-                snackbar = "已删除: ${e.name}"
+                snackbar = "Deleted: ${e.name}"
             } catch (ex: Exception) {
-                snackbar = "删除失败: ${ex.message}"
+                snackbar = "Delete failed: ${ex.message}"
             }
         }
     }
@@ -315,9 +315,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     it.copy(expanded = it.expanded - e.path, children = it.children - e.path)
                 }
                 refreshDir(index, VfsPaths.parent(e.path))
-                snackbar = "已重命名"
+                snackbar = "Renamed"
             } catch (ex: Exception) {
-                snackbar = "重命名失败: ${ex.message}"
+                snackbar = "Rename failed: ${ex.message}"
             }
         }
     }
@@ -328,9 +328,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 withContext(Dispatchers.IO) { tab.vfs.mkdir(VfsPaths.join(dir, name)) }
                 refreshDir(index, dir)
-                snackbar = "已创建文件夹: $name"
+                snackbar = "Folder created: $name"
             } catch (ex: Exception) {
-                snackbar = "创建失败: ${ex.message}"
+                snackbar = "Create failed: ${ex.message}"
             }
         }
     }

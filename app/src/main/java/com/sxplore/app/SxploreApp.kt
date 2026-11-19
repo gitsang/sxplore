@@ -19,7 +19,7 @@ class SxploreApp : Application() {
     }
 }
 
-/** 轻量依赖容器：全局代理 + 连接存储 + VFS 工厂。 */
+/** Lightweight DI container: global proxy + connection store + VFS factories. */
 class AppContainer(context: Context) {
 
     val connectionStore = ConnectionStore(context)

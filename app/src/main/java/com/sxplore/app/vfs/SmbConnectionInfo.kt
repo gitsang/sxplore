@@ -3,7 +3,7 @@ package com.sxplore.app.vfs
 import kotlinx.serialization.Serializable
 
 /**
- * SMB 连接配置。id 用于持久化去重。
+ * SMB connection settings. id is used for persistence and deduplication.
  */
 @Serializable
 data class SmbConnectionInfo(

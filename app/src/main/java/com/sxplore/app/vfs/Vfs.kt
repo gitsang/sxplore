@@ -5,8 +5,8 @@ import java.io.InputStream
 import java.io.OutputStream
 
 /**
- * 统一文件条目。path 为 VFS 内绝对路径，始终使用 '/' 分隔，以 '/' 开头。
- * 例如 "/Movies/demo.mkv"。
+ * Unified file entry. path is absolute within the VFS, always '/'-separated,
+ * starting with '/'. Example: "/Movies/demo.mkv".
  */
 data class VfsEntry(
     val name: String,
@@ -17,23 +17,23 @@ data class VfsEntry(
 )
 
 /**
- * 随机读句柄，供流式代理按偏移读取（HTTP Range → readAt）。
- * 每个 HTTP 请求独占一个句柄，避免并发游标冲突。
+ * Random-access handle for positional reads by the streaming proxy (HTTP Range -> readAt).
+ * Each HTTP request owns its handle, avoiding concurrent cursor conflicts.
  */
 interface VfsRandomAccess : Closeable {
     val length: Long
 
-    /** 从 offset 读取最多 buf.size 字节，返回实际读取数；EOF 返回 -1。 */
+    /** Reads up to buf.size bytes at offset; returns the count read, or -1 at EOF. */
     fun readAt(offset: Long, buf: ByteArray): Int
 }
 
 /**
- * 虚拟文件系统抽象：本地存储 / SMB 统一接口。
- * 后续扩展 WebDAV / FTP / SFTP 只需新增实现。
- * 所有方法均为阻塞 IO，调用方负责切到 Dispatchers.IO。
+ * Virtual file system abstraction: one interface for local storage / SMB.
+ * Adding WebDAV / FTP / SFTP later only requires a new implementation.
+ * All methods are blocking IO; callers must switch to Dispatchers.IO.
  */
 interface Vfs : Closeable {
-    /** 稳定标识，如 "local" 或 "smb://host/share"。 */
+    /** Stable identifier, e.g. "local" or "smb://host/share". */
     val id: String
     val displayName: String
 

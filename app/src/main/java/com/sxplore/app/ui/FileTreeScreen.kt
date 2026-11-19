@@ -48,7 +48,7 @@ fun FileTreeScreen(vm: AppViewModel, index: Int) {
     val rows = remember(tab) { vm.flatten(tab) }
 
     Column(Modifier.fillMaxSize()) {
-        // 当前目录栏（粘贴目标）
+        // Current folder bar (paste destination)
         Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
             Row(
                 Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp),
@@ -69,7 +69,7 @@ fun FileTreeScreen(vm: AppViewModel, index: Int) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 IconButton(onClick = { vm.refreshAll(index) }) {
-                    Icon(Icons.Filled.Refresh, "刷新", Modifier.size(18.dp))
+                    Icon(Icons.Filled.Refresh, "Refresh", Modifier.size(18.dp))
                 }
             }
         }
@@ -80,18 +80,18 @@ fun FileTreeScreen(vm: AppViewModel, index: Int) {
             }
             tab.rootError != null -> Box(Modifier.fillMaxSize(), Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("加载失败", color = MaterialTheme.colorScheme.error)
+                    Text("Failed to load", color = MaterialTheme.colorScheme.error)
                     Text(
                         tab.rootError ?: "",
                         fontSize = 12.sp,
                         modifier = Modifier.padding(8.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    TextButton(onClick = { vm.loadRoot(index) }) { Text("重试") }
+                    TextButton(onClick = { vm.loadRoot(index) }) { Text("Retry") }
                 }
             }
             rows.isEmpty() -> Box(Modifier.fillMaxSize(), Alignment.Center) {
-                Text("空目录", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Empty folder", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 items(rows, key = { it.entry.path }) { row ->

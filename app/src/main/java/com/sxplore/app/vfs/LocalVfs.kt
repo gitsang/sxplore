@@ -9,14 +9,14 @@ import java.io.OutputStream
 import java.io.RandomAccessFile
 
 /**
- * 本地存储 VFS，根目录为外部存储根（需要"所有文件访问"权限）。
+ * Local storage VFS rooted at the external storage root (requires "All files access").
  */
 class LocalVfs : Vfs {
 
     val root: File = Environment.getExternalStorageDirectory()
 
     override val id: String = "local"
-    override val displayName: String = "本地存储"
+    override val displayName: String = "Local storage"
 
     fun realFile(path: String): File =
         if (path == "/" || path.isEmpty()) root else File(root, path.trimStart('/'))
@@ -34,13 +34,13 @@ class LocalVfs : Vfs {
 
     override fun list(path: String): List<VfsEntry> {
         val dir = realFile(path)
-        val files = dir.listFiles() ?: throw IllegalStateException("无法读取目录: $path")
+        val files = dir.listFiles() ?: throw IllegalStateException("Cannot read directory: $path")
         return files.map { toEntry(it) }
     }
 
     override fun stat(path: String): VfsEntry {
         val f = realFile(path)
-        if (!f.exists()) throw IllegalStateException("文件不存在: $path")
+        if (!f.exists()) throw IllegalStateException("File not found: $path")
         return toEntry(f)
     }
 
@@ -70,19 +70,19 @@ class LocalVfs : Vfs {
 
     override fun mkdir(path: String) {
         val f = realFile(path)
-        if (!f.exists() && !f.mkdirs()) throw IllegalStateException("创建目录失败: $path")
+        if (!f.exists() && !f.mkdirs()) throw IllegalStateException("Failed to create directory: $path")
     }
 
     override fun delete(path: String) {
         val f = realFile(path)
-        if (!f.deleteRecursively()) throw IllegalStateException("删除失败: $path")
+        if (!f.deleteRecursively()) throw IllegalStateException("Delete failed: $path")
     }
 
     override fun rename(path: String, newName: String) {
         val f = realFile(path)
         val target = File(f.parentFile, newName)
-        if (target.exists()) throw IllegalStateException("目标已存在: $newName")
-        if (!f.renameTo(target)) throw IllegalStateException("重命名失败: $path")
+        if (target.exists()) throw IllegalStateException("Target already exists: $newName")
+        if (!f.renameTo(target)) throw IllegalStateException("Rename failed: $path")
     }
 
     override fun close() {}

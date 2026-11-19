@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- 仅允许对本机流式代理的明文 HTTP；SMB 走 445 原生协议不受影响 -->
+    <!-- Allow cleartext HTTP only for the local streaming proxy; SMB uses native port 445 and is unaffected -->
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">127.0.0.1</domain>
         <domain includeSubdomains="false">localhost</domain>

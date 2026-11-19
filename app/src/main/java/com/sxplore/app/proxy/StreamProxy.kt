@@ -11,13 +11,15 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
- * 本地流式代理：仅监听 127.0.0.1 随机端口。
+ * Local streaming proxy: binds only to 127.0.0.1 on a random port.
  *
- * 播放器的 HTTP Range 请求 → VFS 随机读（SMB READ 带偏移 / 本地 RandomAccessFile），
- * 数据边读边发，全程零落盘。内置 ExoPlayer 与外部播放器（MX/VLC）共用同一条 URL。
+ * Player HTTP Range requests -> VFS positional reads (SMB READ with offset /
+ * local RandomAccessFile). Data is read and sent on the fly, never written to
+ * disk. The built-in ExoPlayer and external players (MX/VLC) share one URL.
  *
- * URL 形如 http://127.0.0.1:{port}/s/{随机token}/{文件名}
- * token 不可猜测，且仅本机可达，避免局域网内其他设备读取。
+ * URL shape: http://127.0.0.1:{port}/s/{random-token}/{file-name}
+ * Tokens are unguessable and reachable only from this device, so other
+ * devices on the LAN cannot read the streams.
  */
 class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
 
@@ -115,7 +117,7 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
         }
     }
 
-    /** 把 VfsRandomAccess 包装为限定区间 [start, start+len) 的 InputStream。 */
+    /** Wraps a VfsRandomAccess as an InputStream limited to [start, start+len). */
     private class RaInputStream(
         private val ra: VfsRandomAccess,
         start: Long,

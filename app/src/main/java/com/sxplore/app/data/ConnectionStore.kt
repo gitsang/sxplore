@@ -9,8 +9,8 @@ import kotlinx.serialization.json.Json
 import java.util.UUID
 
 /**
- * SMB 连接持久化：EncryptedSharedPreferences（AES256-GCM），
- * 凭据不以明文落盘。
+ * SMB connection persistence via EncryptedSharedPreferences (AES256-GCM);
+ * credentials are never stored in plaintext.
  */
 class ConnectionStore(context: Context) {
 
