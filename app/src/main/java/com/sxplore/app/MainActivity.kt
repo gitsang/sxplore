@@ -1,0 +1,124 @@
+package com.sxplore.app
+
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.sxplore.app.ui.AppRoot
+import com.sxplore.app.ui.AppViewModel
+import com.sxplore.app.ui.theme.SxploreTheme
+
+class MainActivity : ComponentActivity() {
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
+        super.onCreate(savedInstanceState)
+        setContent {
+            SxploreTheme {
+                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    PermissionGate {
+                        val vm: AppViewModel = viewModel()
+                        AppRoot(vm)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun hasStoragePermission(ctx: Context): Boolean =
+    if (Build.VERSION.SDK_INT >= 30) {
+        Environment.isExternalStorageManager()
+    } else {
+        ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_EXTERNAL_STORAGE) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+
+@Composable
+private fun PermissionGate(content: @Composable () -> Unit) {
+    val ctx = LocalContext.current
+    var granted by remember { mutableStateOf(hasStoragePermission(ctx)) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) granted = hasStoragePermission(ctx)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val legacyLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { granted = hasStoragePermission(ctx) }
+
+    if (granted) {
+        content()
+    } else {
+        Column(
+            Modifier.fillMaxSize().padding(32.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("需要文件访问权限", fontSize = 20.sp)
+            Text(
+                "Sxplore 是文件管理器，需要访问设备存储才能浏览和管理本地文件。\nSMB 网络文件不受此权限影响。",
+                fontSize = 14.sp,
+                modifier = Modifier.padding(vertical = 16.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(onClick = {
+                if (Build.VERSION.SDK_INT >= 30) {
+                    val intent = Intent(
+                        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:${ctx.packageName}"),
+                    )
+                    runCatching { ctx.startActivity(intent) }.onFailure {
+                        ctx.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                    }
+                } else {
+                    legacyLauncher.launch(
+                        arrayOf(
+                            Manifest.permission.READ_EXTERNAL_STORAGE,
+                            Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                        )
+                    )
+                }
+            }) { Text("授予权限") }
+        }
+    }
+}
