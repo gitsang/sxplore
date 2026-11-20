@@ -31,9 +31,9 @@ class SmbVfs(val info: SmbConnectionInfo) : Vfs {
     override val displayName: String = info.name
 
     private val clientConfig: SmbConfig = SmbConfig.builder()
-        // Generous timeouts for slow remote links (~10KB/s): a single read
-        // can legitimately take tens of seconds there.
-        .withTimeout(60, TimeUnit.SECONDS)
+        // Fail fast on stalled reads (server-side AV scan / dedup recall / disk
+        // spin-up can hang a single READ); the proxy layer retries transparently.
+        .withTimeout(20, TimeUnit.SECONDS)
         .withSoTimeout(60, TimeUnit.SECONDS)
         // Use the server-negotiated max read/write/transact sizes (multi-MB),
         // like desktop SMB clients. The 64KB default turns streaming into
@@ -74,13 +74,24 @@ class SmbVfs(val info: SmbConnectionInfo) : Vfs {
         return ds
     }
 
-    /** Rebuild the session and retry once when the connection drops. */
+    /**
+     * Retry once on failure. Only tear down and reconnect when the session is
+     * actually dead — reconnecting on operation-level errors would kill every
+     * other in-flight stream sharing this session (playback + captions).
+     */
     private fun <T> withRetry(block: (DiskShare) -> T): T {
         return try {
             block(share())
         } catch (e: Exception) {
-            synchronized(this) { closeQuietly() }
-            block(share())
+            val s = share
+            if (s != null && s.isConnected) {
+                android.util.Log.w("SxploreSmb", "op failed on healthy session, retrying: ${e.message}")
+                block(s)
+            } else {
+                android.util.Log.w("SxploreSmb", "session lost, reconnecting: ${e.message}")
+                synchronized(this) { closeQuietly() }
+                block(share())
+            }
         }
     }
 

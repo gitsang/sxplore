@@ -111,62 +111,111 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
         }
 
         val len = end - start + 1
-        val ra = try {
-            ref.vfs.openRandomAccess(ref.path)
-        } catch (e: Exception) {
-            return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "open failed: ${e.message}")
-        }
+        android.util.Log.d("SxploreProxy", "GET ${ref.path} range=$rangeHeader start=$start len=$len")
 
         val partial = rangeHeader != null
         val status = if (partial) Response.Status.PARTIAL_CONTENT else Response.Status.OK
         val chunk = minOf(ref.vfs.preferredReadSize, 1024 * 1024)
         val monitor = if (ref.vfs is SmbVfs) speedMonitor else null
-        return newFixedLengthResponse(status, ref.mime, PrefetchInputStream(ra, start, len, chunk, monitor), len).apply {
+        // Open the backing handle lazily in the worker: a slow server-side open
+        // (AV scan / dedup recall / disk spin-up) must not block the response
+        // headers, and transient open failures get retried transparently.
+        val opener = { ref.vfs.openRandomAccess(ref.path) }
+        return newFixedLengthResponse(
+            status, ref.mime,
+            PrefetchInputStream(opener, start, len, chunk, monitor, ref.path), len,
+        ).apply {
             addHeader("Accept-Ranges", "bytes")
             if (partial) addHeader("Content-Range", "bytes $start-$end/$total")
         }
     }
 
     /**
-     * Prefetching InputStream over a VfsRandomAccess, limited to [start, start+total).
+     * Prefetching InputStream over a lazily-opened VfsRandomAccess, limited to
+     * [start, start+total).
      *
-     * A background worker reads ahead into a bounded queue so SMB round-trip
-     * latency and Wi-Fi jitter are hidden from the player. The read unit is
-     * adaptive: it starts at 64KB so bytes reach the player quickly even on
-     * very slow links (~10KB/s), grows toward maxChunk on fast links, and
-     * shrinks again when reads get slow. Fixed 1MB units used to stall the
-     * HTTP side for >30s on slow links, causing player read timeouts.
+     * A background worker opens the handle (with retries), then reads ahead
+     * into a bounded queue so SMB round-trip latency and Wi-Fi jitter are
+     * hidden from the player. The read unit is adaptive (16KB..maxChunk).
+     * A failed read reopens the handle and retries at the same offset instead
+     * of killing the stream, so transient SMB glitches and server-side stalls
+     * recover transparently.
      */
     private class PrefetchInputStream(
-        private val ra: VfsRandomAccess,
+        private val opener: () -> VfsRandomAccess,
         start: Long,
         total: Long,
         private val maxChunk: Int,
         private val monitor: SpeedMonitor?,
+        private val logTag: String,
     ) : InputStream() {
 
         private val queue = ArrayBlockingQueue<ByteArray>(QUEUE_DEPTH)
         @Volatile private var failure: IOException? = null
         @Volatile private var closed = false
         @Volatile private var done = false
+        @Volatile private var ra: VfsRandomAccess? = null
 
         private var current: ByteArray? = null
         private var currentPos = 0
         private var remaining = total
 
+        private fun openWithRetry(maxAttempts: Int): VfsRandomAccess? {
+            var attempt = 0
+            while (!closed && attempt < maxAttempts) {
+                try {
+                    val h = opener()
+                    ra = h
+                    return h
+                } catch (e: Exception) {
+                    attempt++
+                    android.util.Log.w("SxploreProxy", "[$logTag] open failed (attempt $attempt): ${e.message}")
+                    if (attempt >= maxAttempts) {
+                        failure = IOException("open failed after $attempt attempts", e)
+                        return null
+                    }
+                    try {
+                        Thread.sleep(400L * attempt)
+                    } catch (_: InterruptedException) {
+                        return null
+                    }
+                }
+            }
+            return null
+        }
+
         private val worker = Thread({
+            var handle: VfsRandomAccess? = null
             try {
+                val tOpen = SystemClock.elapsedRealtime()
+                handle = openWithRetry(4)
+                if (handle == null) return@Thread
+                android.util.Log.d("SxploreProxy", "[$logTag] opened in ${SystemClock.elapsedRealtime() - tOpen}ms, streaming $total bytes from $start")
+
                 var pos = start
                 var left = total
                 var unit = MIN_UNIT
+                var firstByteLogged = false
                 while (!closed && left > 0) {
                     val want = minOf(unit.toLong(), left).toInt()
                     val buf = ByteArray(want)
                     var filled = 0
                     val t0 = SystemClock.elapsedRealtime()
                     while (filled < want && !closed) {
-                        val n = ra.readAt(pos + filled, buf, filled, want - filled)
+                        val n = try {
+                            handle!!.readAt(pos + filled, buf, filled, want - filled)
+                        } catch (e: Exception) {
+                            // Reopen and retry the same offset; do not kill the stream.
+                            android.util.Log.w("SxploreProxy", "[$logTag] read failed at ${pos + filled}: ${e.message}; reopening")
+                            runCatching { handle!!.close() }
+                            handle = openWithRetry(3) ?: throw IOException("reopen failed", e)
+                            continue
+                        }
                         if (n <= 0) break
+                        if (!firstByteLogged) {
+                            android.util.Log.d("SxploreProxy", "[$logTag] first $n bytes after ${SystemClock.elapsedRealtime() - t0}ms")
+                            firstByteLogged = true
+                        }
                         filled += n
                         monitor?.record(n)
                     }
@@ -183,9 +232,11 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
                         else -> unit
                     }
                 }
+                android.util.Log.d("SxploreProxy", "[$logTag] worker finished, left=$left closed=$closed")
             } catch (_: InterruptedException) {
                 // closed while blocked on the queue
             } catch (e: Exception) {
+                android.util.Log.e("SxploreProxy", "[$logTag] prefetch failed", e)
                 failure = IOException("prefetch failed", e)
             } finally {
                 done = true
@@ -230,7 +281,7 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
             closed = true
             worker.interrupt()
             queue.clear()
-            runCatching { ra.close() }
+            runCatching { ra?.close() }
         }
 
         companion object {
