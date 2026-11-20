@@ -20,3 +20,10 @@ private val DATE_FMT = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
 
 fun formatDate(millis: Long): String =
     if (millis <= 0) "" else DATE_FMT.format(Date(millis))
+
+fun formatSpeed(bytesPerSec: Long): String {
+    if (bytesPerSec < 1024) return "$bytesPerSec B/s"
+    val kb = bytesPerSec / 1024.0
+    if (kb < 1024) return "%.0f KB/s".format(kb)
+    return "%.1f MB/s".format(kb / 1024.0)
+}

@@ -23,6 +23,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -40,6 +41,33 @@ import com.sxplore.app.util.formatDate
 import com.sxplore.app.util.formatSize
 import com.sxplore.app.vfs.SmbConnectionInfo
 import com.sxplore.app.vfs.VfsEntry
+
+@Composable
+fun SettingsDialog(vm: AppViewModel) {
+    AlertDialog(
+        onDismissRequest = { vm.showSettings = false },
+        title = { Text("Settings") },
+        text = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Real-time network speed", fontSize = 15.sp)
+                    Text(
+                        "Show live download speed while playing",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = vm.showLiveSpeed,
+                    onCheckedChange = { vm.setLiveSpeedEnabled(it) },
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { vm.showSettings = false }) { Text("Done") }
+        },
+    )
+}
 
 @Composable
 fun NewTabDialog(vm: AppViewModel) {

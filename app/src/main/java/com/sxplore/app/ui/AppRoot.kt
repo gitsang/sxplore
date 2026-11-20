@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -77,6 +78,9 @@ fun AppRoot(vm: AppViewModel) {
                 TopAppBar(
                     title = { Text("Sxplore", fontSize = 20.sp) },
                     actions = {
+                        IconButton(onClick = { vm.showSettings = true }) {
+                            Icon(Icons.Filled.Settings, "Settings")
+                        }
                         IconButton(onClick = {
                             vm.refreshConnections()
                             vm.showNewTab = true
@@ -126,6 +130,9 @@ fun AppRoot(vm: AppViewModel) {
 
     // ---------- Dialogs ----------
 
+    if (vm.showSettings) {
+        SettingsDialog(vm)
+    }
     if (vm.showNewTab) {
         NewTabDialog(vm)
     }

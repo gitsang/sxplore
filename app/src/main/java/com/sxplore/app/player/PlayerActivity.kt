@@ -12,16 +12,22 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -41,12 +47,20 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.ui.PlayerView
+import com.sxplore.app.SxploreApp
+import com.sxplore.app.util.formatSpeed
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 /**
  * Built-in player: Media3/ExoPlayer.
  * SMB files go through the local proxy URL (http://127.0.0.1), local files use file://.
  * Both support seeking; fully streamed, nothing is written to disk.
+ *
+ * Shows buffering progress + live network speed while loading, and an optional
+ * persistent speed badge (Settings -> Real-time network speed).
  */
 class PlayerActivity : ComponentActivity() {
 
@@ -54,9 +68,19 @@ class PlayerActivity : ComponentActivity() {
     private var wifiLock: WifiManager.WifiLock? = null
     private var errorMsg by mutableStateOf<String?>(null)
 
+    private var isBuffering by mutableStateOf(true)
+    private var isPlaying by mutableStateOf(false)
+    private var bufferedPct by mutableStateOf(0)
+    private var speedBps by mutableStateOf(0L)
+    private var showLiveSpeed = true
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        val container = (application as SxploreApp).container
+        showLiveSpeed = container.settings.showLiveSpeed
+        val speedMonitor = container.proxy.speedMonitor
 
         // Keep Wi-Fi out of power-save while streaming: power-save adds
         // latency spikes that cause constant re-buffering on SMB playback.
@@ -81,15 +105,19 @@ class PlayerActivity : ComponentActivity() {
         val title = intent.getStringExtra(EXTRA_TITLE) ?: ""
         val mime = intent.getStringExtra(EXTRA_MIME) ?: "video/*"
 
+        // Read timeout generous enough for slow remote links; the adaptive
+        // prefetch keeps bytes trickling, so this only fires on real stalls.
         val httpFactory = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(15_000)
-            .setReadTimeoutMs(30_000)
+            .setReadTimeoutMs(60_000)
 
         val p = ExoPlayer.Builder(this)
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(this)
                     .setDataSourceFactory(DefaultDataSource.Factory(this, httpFactory))
+                    // More retries for flaky/slow networks before surfacing an error.
+                    .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(6))
             )
             .build()
         p.setAudioAttributes(
@@ -103,6 +131,15 @@ class PlayerActivity : ComponentActivity() {
         p.playWhenReady = true
         p.prepare()
         p.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                isBuffering = state == Player.STATE_BUFFERING
+                if (isBuffering) bufferedPct = p.bufferedPercentage
+            }
+
+            override fun onIsPlayingChanged(playing: Boolean) {
+                isPlaying = playing
+            }
+
             override fun onPlayerError(error: PlaybackException) {
                 errorMsg = "Playback failed: ${error.errorCodeName}\n${error.message}"
             }
@@ -110,6 +147,17 @@ class PlayerActivity : ComponentActivity() {
         player = p
 
         setContent {
+            // Poll buffer position and network speed for the overlays.
+            LaunchedEffect(Unit) {
+                while (isActive) {
+                    speedBps = speedMonitor.bytesPerSecond()
+                    if (isBuffering) {
+                        bufferedPct = player?.bufferedPercentage ?: 0
+                    }
+                    delay(500)
+                }
+            }
+
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Box(Modifier.fillMaxSize().background(Color.Black)) {
                     AndroidView(
@@ -119,6 +167,8 @@ class PlayerActivity : ComponentActivity() {
                                 useController = true
                                 setShowSubtitleButton(true)
                                 controllerShowTimeoutMs = 3000
+                                // We render our own buffering overlay with % and speed.
+                                setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
                             }
                         },
                         modifier = Modifier.fillMaxSize(),
@@ -138,6 +188,49 @@ class PlayerActivity : ComponentActivity() {
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
+
+                    // Buffering overlay: progress + live speed.
+                    if (isBuffering && errorMsg == null) {
+                        Column(
+                            Modifier
+                                .align(Alignment.Center)
+                                .background(Color(0x99000000), RoundedCornerShape(12.dp))
+                                .padding(horizontal = 24.dp, vertical = 18.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                modifier = Modifier.size(36.dp),
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                "Buffering… $bufferedPct%",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                formatSpeed(speedBps),
+                                color = Color(0xFFB0BEC5),
+                                fontSize = 12.sp,
+                            )
+                        }
+                    }
+
+                    // Optional persistent live-speed badge.
+                    if (showLiveSpeed && (isBuffering || isPlaying)) {
+                        Text(
+                            formatSpeed(speedBps),
+                            Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(12.dp)
+                                .background(Color(0x66000000), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            color = Color.White,
+                            fontSize = 12.sp,
+                        )
+                    }
+
                     errorMsg?.let { msg ->
                         Column(
                             Modifier.align(Alignment.Center).padding(24.dp),

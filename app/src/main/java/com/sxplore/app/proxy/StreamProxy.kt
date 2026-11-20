@@ -1,7 +1,9 @@
 package com.sxplore.app.proxy
 
 import android.net.Uri
+import android.os.SystemClock
 import android.webkit.MimeTypeMap
+import com.sxplore.app.vfs.SmbVfs
 import com.sxplore.app.vfs.Vfs
 import com.sxplore.app.vfs.VfsRandomAccess
 import fi.iki.elonen.NanoHTTPD
@@ -30,6 +32,9 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
 
     private val refs = ConcurrentHashMap<String, Ref>()
     private val order = ConcurrentLinkedQueue<String>()
+
+    /** Live download speed of SMB streams, for the player UI. */
+    val speedMonitor = SpeedMonitor()
 
     fun startProxy() {
         start(SOCKET_READ_TIMEOUT, false)
@@ -115,7 +120,8 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
         val partial = rangeHeader != null
         val status = if (partial) Response.Status.PARTIAL_CONTENT else Response.Status.OK
         val chunk = minOf(ref.vfs.preferredReadSize, 1024 * 1024)
-        return newFixedLengthResponse(status, ref.mime, PrefetchInputStream(ra, start, len, chunk), len).apply {
+        val monitor = if (ref.vfs is SmbVfs) speedMonitor else null
+        return newFixedLengthResponse(status, ref.mime, PrefetchInputStream(ra, start, len, chunk, monitor), len).apply {
             addHeader("Accept-Ranges", "bytes")
             if (partial) addHeader("Content-Range", "bytes $start-$end/$total")
         }
@@ -124,17 +130,19 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
     /**
      * Prefetching InputStream over a VfsRandomAccess, limited to [start, start+total).
      *
-     * A background worker reads ahead in ~1MB chunks into a bounded queue, so
-     * SMB round-trip latency and Wi-Fi jitter are hidden from the player: the
-     * HTTP side consumes buffered chunks while the next ones are already in
-     * flight. Without prefetch, every small read waits a full RTT and playback
-     * constantly re-buffers.
+     * A background worker reads ahead into a bounded queue so SMB round-trip
+     * latency and Wi-Fi jitter are hidden from the player. The read unit is
+     * adaptive: it starts at 64KB so bytes reach the player quickly even on
+     * very slow links (~10KB/s), grows toward maxChunk on fast links, and
+     * shrinks again when reads get slow. Fixed 1MB units used to stall the
+     * HTTP side for >30s on slow links, causing player read timeouts.
      */
     private class PrefetchInputStream(
         private val ra: VfsRandomAccess,
         start: Long,
         total: Long,
-        chunkSize: Int,
+        private val maxChunk: Int,
+        private val monitor: SpeedMonitor?,
     ) : InputStream() {
 
         private val queue = ArrayBlockingQueue<ByteArray>(QUEUE_DEPTH)
@@ -150,20 +158,30 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
             try {
                 var pos = start
                 var left = total
+                var unit = MIN_UNIT
                 while (!closed && left > 0) {
-                    val want = minOf(chunkSize.toLong(), left).toInt()
+                    val want = minOf(unit.toLong(), left).toInt()
                     val buf = ByteArray(want)
                     var filled = 0
+                    val t0 = SystemClock.elapsedRealtime()
                     while (filled < want && !closed) {
                         val n = ra.readAt(pos + filled, buf, filled, want - filled)
                         if (n <= 0) break
                         filled += n
+                        monitor?.record(n)
                     }
+                    val elapsed = SystemClock.elapsedRealtime() - t0
                     if (filled == 0) break
                     queue.put(if (filled == want) buf else buf.copyOf(filled))
                     pos += filled
                     left -= filled
                     if (filled < want) break // EOF
+                    // Adapt unit size to measured throughput.
+                    unit = when {
+                        elapsed < 250 -> (unit * 2).coerceAtMost(maxChunk)
+                        elapsed > 2000 -> (unit / 2).coerceAtLeast(MIN_UNIT)
+                        else -> unit
+                    }
                 }
             } catch (_: InterruptedException) {
                 // closed while blocked on the queue
@@ -216,7 +234,8 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
         }
 
         companion object {
-            private const val QUEUE_DEPTH = 4
+            private const val QUEUE_DEPTH = 16
+            private const val MIN_UNIT = 64 * 1024
         }
     }
 

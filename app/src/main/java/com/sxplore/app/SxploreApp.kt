@@ -3,6 +3,7 @@ package com.sxplore.app
 import android.app.Application
 import android.content.Context
 import com.sxplore.app.data.ConnectionStore
+import com.sxplore.app.data.SettingsStore
 import com.sxplore.app.proxy.StreamProxy
 import com.sxplore.app.vfs.LocalVfs
 import com.sxplore.app.vfs.SmbConnectionInfo
@@ -23,6 +24,8 @@ class SxploreApp : Application() {
 class AppContainer(context: Context) {
 
     val connectionStore = ConnectionStore(context)
+
+    val settings = SettingsStore(context)
 
     val proxy = StreamProxy().apply {
         runCatching { startProxy() }

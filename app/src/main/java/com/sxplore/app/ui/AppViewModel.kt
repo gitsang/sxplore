@@ -56,6 +56,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var snackbar by mutableStateOf<String?>(null)
     var savedConnections by mutableStateOf<List<SmbConnectionInfo>>(emptyList())
 
+    // Settings
+    var showLiveSpeed by mutableStateOf(container.settings.showLiveSpeed)
+    var showSettings by mutableStateOf(false)
+
+    fun setLiveSpeedEnabled(on: Boolean) {
+        showLiveSpeed = on
+        container.settings.showLiveSpeed = on
+    }
+
     // Dialog state
     var showNewTab by mutableStateOf(false)
     var connectInitial by mutableStateOf<SmbConnectionInfo?>(null)

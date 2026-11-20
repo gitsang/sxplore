@@ -31,7 +31,9 @@ class SmbVfs(val info: SmbConnectionInfo) : Vfs {
     override val displayName: String = info.name
 
     private val clientConfig: SmbConfig = SmbConfig.builder()
-        .withTimeout(20, TimeUnit.SECONDS)
+        // Generous timeouts for slow remote links (~10KB/s): a single read
+        // can legitimately take tens of seconds there.
+        .withTimeout(60, TimeUnit.SECONDS)
         .withSoTimeout(60, TimeUnit.SECONDS)
         // Use the server-negotiated max read/write/transact sizes (multi-MB),
         // like desktop SMB clients. The 64KB default turns streaming into
