@@ -40,6 +40,12 @@
             android:supportsPictureInPicture="false"
             android:theme="@style/Theme.Sxplore.Player" />
 
+        <activity
+            android:name=".player.ImageActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/Theme.Sxplore.Player" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

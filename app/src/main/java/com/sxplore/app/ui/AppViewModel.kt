@@ -12,6 +12,7 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.sxplore.app.SxploreApp
+import com.sxplore.app.player.ImageActivity
 import com.sxplore.app.player.PlayerActivity
 import com.sxplore.app.proxy.StreamProxy
 import com.sxplore.app.vfs.LocalVfs
@@ -262,7 +263,47 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ---------- Playback ----------
+    // ---------- Playback / opening ----------
+
+    /**
+     * Default click behavior: open with the last-used method for this media
+     * kind (built-in vs external, remembered per kind). Long-press menu is
+     * where the user switches methods.
+     */
+    fun openFile(index: Int, e: VfsEntry) {
+        val kind = StreamProxy.kindOf(e.name)
+        val internal = container.settings.openInternally(kind)
+        when (kind) {
+            "video", "audio" -> if (internal) playInternal(index, e) else playExternal(index, e)
+            "image" -> if (internal) previewImage(index, e) else playExternal(index, e)
+            else -> playExternal(index, e)
+        }
+    }
+
+    /** Chosen from the long-press menu: remember the choice, then open. */
+    fun openInternalChosen(index: Int, e: VfsEntry) {
+        val kind = StreamProxy.kindOf(e.name)
+        container.settings.setOpenMode(kind, true)
+        if (kind == "image") previewImage(index, e) else playInternal(index, e)
+    }
+
+    fun openExternalChosen(index: Int, e: VfsEntry) {
+        container.settings.setOpenMode(StreamProxy.kindOf(e.name), false)
+        playExternal(index, e)
+    }
+
+    private fun previewImage(index: Int, e: VfsEntry) {
+        try {
+            val url = streamUrl(index, e)
+            val ctx = getApplication<Application>()
+            ctx.startActivity(
+                ImageActivity.makeIntent(ctx, url, e.name)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (ex: Exception) {
+            snackbar = "Cannot preview: ${ex.message}"
+        }
+    }
 
     private fun streamUrl(index: Int, e: VfsEntry): String {
         val tab = tabs[index]
@@ -303,7 +344,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         try {
             ctx.startActivity(
-                Intent.createChooser(intent, "Choose a player").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                Intent.createChooser(intent, "Open with").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
         } catch (ex: ActivityNotFoundException) {
             snackbar = "No player app found"

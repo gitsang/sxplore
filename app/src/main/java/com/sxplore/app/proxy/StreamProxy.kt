@@ -266,6 +266,15 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
             "opus" to "audio/opus",
             "ape" to "audio/x-ape",
             "wma" to "audio/x-ms-wma",
+            "jpg" to "image/jpeg",
+            "jpeg" to "image/jpeg",
+            "png" to "image/png",
+            "gif" to "image/gif",
+            "webp" to "image/webp",
+            "bmp" to "image/bmp",
+            "heic" to "image/heic",
+            "heif" to "image/heif",
+            "avif" to "image/avif",
         )
 
         fun mimeOf(fileName: String): String {
@@ -280,6 +289,17 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
             if (ext in VIDEO_MIME) return true
             val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: return false
             return mime.startsWith("video/") || mime.startsWith("audio/")
+        }
+
+        /** Media kind used for open-mode memory: video / audio / image / other. */
+        fun kindOf(fileName: String): String {
+            val mime = mimeOf(fileName)
+            return when {
+                mime.startsWith("video/") -> "video"
+                mime.startsWith("audio/") -> "audio"
+                mime.startsWith("image/") -> "image"
+                else -> "other"
+            }
         }
     }
 }

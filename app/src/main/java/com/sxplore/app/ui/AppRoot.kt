@@ -194,8 +194,8 @@ fun AppRoot(vm: AppViewModel) {
         FileActionsDialog(
             entry = e,
             onDismiss = { vm.fileAction = null },
-            onPlayInternal = { vm.fileAction = null; vm.playInternal(idx, e) },
-            onPlayExternal = { vm.fileAction = null; vm.playExternal(idx, e) },
+            onPlayInternal = { vm.fileAction = null; vm.openInternalChosen(idx, e) },
+            onPlayExternal = { vm.fileAction = null; vm.openExternalChosen(idx, e) },
             onCopy = { vm.fileAction = null; vm.setClipboard(idx, e, move = false) },
             onCut = { vm.fileAction = null; vm.setClipboard(idx, e, move = true) },
             onRename = { vm.fileAction = null; vm.renameTarget = idx to e },

@@ -227,17 +227,24 @@ fun FileActionsDialog(
     onDelete: () -> Unit,
     onInfo: () -> Unit,
 ) {
-    val media = StreamProxy.isMedia(entry.name)
+    val kind = StreamProxy.kindOf(entry.name)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(entry.name, fontSize = 16.sp, maxLines = 2) },
         text = {
             Column {
-                if (media) {
-                    ActionItem("▶ Play built-in (streaming)", onPlayInternal)
-                    ActionItem("↗ External player (streaming)", onPlayExternal)
-                } else {
-                    ActionItem("↗ Open with another app", onPlayExternal)
+                when (kind) {
+                    "video", "audio" -> {
+                        ActionItem("▶ Play built-in (streaming)", onPlayInternal)
+                        ActionItem("↗ External player (streaming)", onPlayExternal)
+                    }
+                    "image" -> {
+                        ActionItem("Preview built-in", onPlayInternal)
+                        ActionItem("↗ Open with another app", onPlayExternal)
+                    }
+                    else -> {
+                        ActionItem("↗ Open with another app", onPlayExternal)
+                    }
                 }
                 ActionItem("Copy", onCopy)
                 ActionItem("Cut (move)", onCut)

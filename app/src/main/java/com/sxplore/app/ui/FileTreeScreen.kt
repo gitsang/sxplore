@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Checkbox
@@ -136,7 +137,6 @@ private fun TreeRowItem(vm: AppViewModel, index: Int, tab: TabUiState, row: Tree
     val expanded = e.path in tab.expanded
     val loading = e.path in tab.loading
     val selected = e.path in tab.selected
-    val selectionMode = tab.selected.isNotEmpty()
 
     Row(
         Modifier
@@ -146,14 +146,12 @@ private fun TreeRowItem(vm: AppViewModel, index: Int, tab: TabUiState, row: Tree
             )
             .combinedClickable(
                 onClick = {
-                    when {
-                        selectionMode -> vm.toggleSelect(index, e.path)
-                        e.isDir -> vm.toggleDir(index, e)
-                        else -> vm.fileAction = index to e
-                    }
+                    // Selection is checkbox-only; taps always keep their normal
+                    // behavior (expand folders / open files), even mid-selection.
+                    if (e.isDir) vm.toggleDir(index, e) else vm.openFile(index, e)
                 },
                 onLongClick = {
-                    if (e.isDir) vm.dirAction = index to e else vm.toggleSelect(index, e.path)
+                    if (e.isDir) vm.dirAction = index to e else vm.fileAction = index to e
                 },
             )
             .padding(start = (4 + row.depth * 18).dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
@@ -176,8 +174,9 @@ private fun TreeRowItem(vm: AppViewModel, index: Int, tab: TabUiState, row: Tree
         Icon(
             imageVector = when {
                 e.isDir -> Icons.Filled.Folder
-                StreamProxy.isMedia(e.name) && isVideo(e.name) -> Icons.Filled.Movie
-                StreamProxy.isMedia(e.name) -> Icons.Filled.Audiotrack
+                StreamProxy.kindOf(e.name) == "video" -> Icons.Filled.Movie
+                StreamProxy.kindOf(e.name) == "audio" -> Icons.Filled.Audiotrack
+                StreamProxy.kindOf(e.name) == "image" -> Icons.Filled.Image
                 else -> Icons.AutoMirrored.Filled.InsertDriveFile
             },
             contentDescription = null,
@@ -187,13 +186,24 @@ private fun TreeRowItem(vm: AppViewModel, index: Int, tab: TabUiState, row: Tree
         Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) {
             Text(e.name, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(
-                subtitleFor(e, tab),
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                // Size (files) or child counts (folders) on the left, date on the right.
+                Text(
+                    leftMeta(e, tab),
+                    Modifier.weight(1f),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    formatDate(e.lastModified),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
         }
         Checkbox(
             checked = selected,
@@ -203,22 +213,15 @@ private fun TreeRowItem(vm: AppViewModel, index: Int, tab: TabUiState, row: Tree
 }
 
 /**
- * Files: size + modified date. Folders: modified date + child counts
- * (counts shown once the folder's children are cached, i.e. after expanding;
- * no extra network requests are made just for counting).
+ * Left side of the subtitle: file size, or folder child counts once the
+ * folder's children are cached (no extra network requests for counting).
  */
-private fun subtitleFor(e: VfsEntry, tab: TabUiState): String {
-    val date = formatDate(e.lastModified)
-    if (!e.isDir) return "${formatSize(e.size)} · $date"
-    val kids = tab.children[e.path] ?: return date
+private fun leftMeta(e: VfsEntry, tab: TabUiState): String {
+    if (!e.isDir) return formatSize(e.size)
+    val kids = tab.children[e.path] ?: return ""
     val nd = kids.count { it.isDir }
     val nf = kids.size - nd
     val dirs = "$nd " + if (nd == 1) "folder" else "folders"
     val files = "$nf " + if (nf == 1) "file" else "files"
-    return "$date · $dirs, $files"
-}
-
-private fun isVideo(name: String): Boolean {
-    val mime = StreamProxy.mimeOf(name)
-    return mime.startsWith("video/")
+    return "$dirs, $files"
 }
