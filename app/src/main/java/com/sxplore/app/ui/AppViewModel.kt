@@ -293,15 +293,34 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun previewImage(index: Int, e: VfsEntry) {
-        try {
-            val url = streamUrl(index, e)
-            val ctx = getApplication<Application>()
-            ctx.startActivity(
-                ImageActivity.makeIntent(ctx, url, e.name)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        } catch (ex: Exception) {
-            snackbar = "Cannot preview: ${ex.message}"
+        viewModelScope.launch {
+            try {
+                val ctx = getApplication<Application>()
+                val tab = tabs[index]
+                val parent = VfsPaths.parent(e.path)
+                val siblings = (if (parent == "/") tab.rootEntries else tab.children[parent])
+                    ?: withContext(Dispatchers.IO) { tab.vfs.list(parent) }
+                // Image playlist: swipe left/right between sibling images,
+                // optional auto-advance slideshow.
+                val images = siblings
+                    .filter { StreamProxy.kindOf(it.name) == "image" }
+                    .sortedBy { it.name.lowercase() }
+                val startIdx = images.indexOfFirst { it.path == e.path }.coerceAtLeast(0)
+                val urls = ArrayList<String>()
+                val titles = ArrayList<String>()
+                withContext(Dispatchers.IO) {
+                    images.forEach {
+                        urls += streamUrl(index, it)
+                        titles += it.name
+                    }
+                }
+                ctx.startActivity(
+                    ImageActivity.makeIntent(ctx, urls, titles, startIdx)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (ex: Exception) {
+                snackbar = "Cannot preview: ${ex.message}"
+            }
         }
     }
 
@@ -315,17 +334,47 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun playInternal(index: Int, e: VfsEntry) {
-        try {
-            val url = streamUrl(index, e)
-            val ctx = getApplication<Application>()
-            ctx.startActivity(
-                PlayerActivity.makeIntent(ctx, url, e.name, StreamProxy.mimeOf(e.name))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        } catch (ex: Exception) {
-            snackbar = "Cannot play: ${ex.message}"
+        viewModelScope.launch {
+            try {
+                val ctx = getApplication<Application>()
+                val tab = tabs[index]
+                val parent = VfsPaths.parent(e.path)
+                val siblings = (if (parent == "/") tab.rootEntries else tab.children[parent])
+                    ?: withContext(Dispatchers.IO) { tab.vfs.list(parent) }
+                // Playlist = sibling video/audio files in the same folder, so
+                // playback can continue to the next item and loop.
+                val media = siblings
+                    .filter { StreamProxy.kindOf(it.name) == "video" || StreamProxy.kindOf(it.name) == "audio" }
+                    .sortedBy { it.name.lowercase() }
+                val startIdx = media.indexOfFirst { it.path == e.path }.coerceAtLeast(0)
+                val urls = ArrayList<String>()
+                val titles = ArrayList<String>()
+                val subUrls = ArrayList<String>()
+                val subTitles = ArrayList<String>()
+                withContext(Dispatchers.IO) {
+                    media.forEach {
+                        urls += streamUrl(index, it)
+                        titles += it.name
+                    }
+                    siblings.filter { isSubtitleFile(it.name) }
+                        .sortedBy { it.name.lowercase() }
+                        .forEach {
+                            subUrls += streamUrl(index, it)
+                            subTitles += it.name
+                        }
+                }
+                ctx.startActivity(
+                    PlayerActivity.makeIntent(ctx, urls, titles, startIdx, subUrls, subTitles)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (ex: Exception) {
+                snackbar = "Cannot play: ${ex.message}"
+            }
         }
     }
+
+    private fun isSubtitleFile(name: String): Boolean =
+        name.substringAfterLast('.', "").lowercase() in setOf("srt", "ass", "ssa", "vtt")
 
     fun playExternal(index: Int, e: VfsEntry) {
         val ctx = getApplication<Application>()

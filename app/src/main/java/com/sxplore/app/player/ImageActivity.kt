@@ -14,16 +14,26 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -42,23 +52,26 @@ import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
 import coil.decode.GifDecoder
 import coil.request.ImageRequest
+import kotlinx.coroutines.delay
 
 /**
- * Built-in image preview. SMB images load through the local streaming proxy
- * (same zero-download path as playback); local images load via file://.
- * Pinch to zoom, drag to pan, double-tap to toggle zoom. Animated GIF on API 28+.
+ * Built-in image viewer with folder playlist.
+ * Swipe left/right for previous/next image; optional slideshow auto-advance
+ * with adjustable interval and looping. Pinch zoom / pan / double-tap zoom
+ * per image. SMB images stream through the local proxy (zero download).
  */
 class ImageActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val url = intent.getStringExtra(EXTRA_URL)
-        if (url == null) {
+        val urls = intent.getStringArrayListExtra(EXTRA_URLS)
+        if (urls.isNullOrEmpty()) {
             finish()
             return
         }
-        val title = intent.getStringExtra(EXTRA_TITLE) ?: ""
+        val titles = intent.getStringArrayListExtra(EXTRA_TITLES) ?: arrayListOf()
+        val startIndex = intent.getIntExtra(EXTRA_INDEX, 0).coerceIn(0, urls.lastIndex)
 
         val loader = coil.ImageLoader.Builder(this)
             .components {
@@ -69,64 +82,40 @@ class ImageActivity : ComponentActivity() {
 
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
-                var scale by remember { mutableFloatStateOf(1f) }
-                var offset by remember { mutableStateOf(Offset.Zero) }
+                val pagerState = rememberPagerState(
+                    initialPage = startIndex,
+                    pageCount = { urls.size },
+                )
+                var playing by remember { mutableStateOf(false) }
+                var intervalSec by remember { mutableIntStateOf(3) }
+                var loop by remember { mutableStateOf(true) }
 
-                val transformState = rememberTransformableState { zoomChange, panChange, _ ->
-                    scale = (scale * zoomChange).coerceIn(1f, 8f)
-                    offset = if (scale > 1f) offset + panChange else Offset.Zero
+                // Slideshow auto-advance; restarts whenever the page changes
+                // (manual swipe included).
+                LaunchedEffect(playing, pagerState.currentPage, intervalSec, loop) {
+                    if (!playing) return@LaunchedEffect
+                    delay(intervalSec * 1000L)
+                    val next = pagerState.currentPage + 1
+                    when {
+                        next < urls.size -> pagerState.animateScrollToPage(next)
+                        loop -> pagerState.animateScrollToPage(0)
+                        else -> playing = false
+                    }
                 }
 
                 Box(Modifier.fillMaxSize().background(Color.Black)) {
-                    SubcomposeAsyncImage(
-                        model = ImageRequest.Builder(this@ImageActivity)
-                            .data(url)
-                            .build(),
-                        contentDescription = title,
-                        imageLoader = loader,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .graphicsLayer {
-                                scaleX = scale
-                                scaleY = scale
-                                translationX = offset.x
-                                translationY = offset.y
-                            }
-                            .transformable(transformState)
-                            .pointerInput(Unit) {
-                                detectTapGestures(
-                                    onDoubleTap = {
-                                        if (scale > 1f) {
-                                            scale = 1f
-                                            offset = Offset.Zero
-                                        } else {
-                                            scale = 2.5f
-                                        }
-                                    },
-                                )
-                            },
-                    ) {
-                        when (painter.state) {
-                            is AsyncImagePainter.State.Loading -> Box(
-                                Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                CircularProgressIndicator(color = Color.White)
-                            }
-                            is AsyncImagePainter.State.Error -> Box(
-                                Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    "Failed to load image",
-                                    color = Color.White,
-                                    fontSize = 14.sp,
-                                )
-                            }
-                            else -> SubcomposeAsyncImageContent()
-                        }
+                    HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxSize(),
+                    ) { page ->
+                        ZoomableImage(
+                            url = urls[page],
+                            title = titles.getOrElse(page) { "" },
+                            loader = loader,
+                        )
                     }
+
+                    // Top bar: back + title + counter.
                     Row(
                         Modifier.align(Alignment.TopStart).padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -135,12 +124,50 @@ class ImageActivity : ComponentActivity() {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
                         }
                         Text(
-                            title,
+                            titles.getOrElse(pagerState.currentPage) { "" },
                             color = Color.White,
                             fontSize = 14.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
                         )
+                        Text(
+                            "  ${pagerState.currentPage + 1} / ${urls.size}",
+                            color = Color(0xFFB0BEC5),
+                            fontSize = 12.sp,
+                        )
+                    }
+
+                    // Slideshow controls: play/pause, interval, loop.
+                    Row(
+                        Modifier.align(Alignment.TopEnd).padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TextButton(onClick = {
+                            intervalSec = when (intervalSec) {
+                                2 -> 3
+                                3 -> 5
+                                5 -> 10
+                                else -> 2
+                            }
+                        }) {
+                            Text("${intervalSec}s", color = Color.White, fontSize = 12.sp)
+                        }
+                        IconButton(onClick = { loop = !loop }) {
+                            Icon(
+                                Icons.Filled.Repeat, "Loop slideshow",
+                                Modifier.size(20.dp),
+                                tint = if (loop) Color.White else Color(0xFF666666),
+                            )
+                        }
+                        IconButton(onClick = { playing = !playing }) {
+                            Icon(
+                                if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                if (playing) "Pause slideshow" else "Start slideshow",
+                                Modifier.size(24.dp),
+                                tint = Color.White,
+                            )
+                        }
                     }
                 }
             }
@@ -148,13 +175,76 @@ class ImageActivity : ComponentActivity() {
     }
 
     companion object {
-        private const val EXTRA_URL = "url"
-        private const val EXTRA_TITLE = "title"
+        private const val EXTRA_URLS = "urls"
+        private const val EXTRA_TITLES = "titles"
+        private const val EXTRA_INDEX = "index"
 
-        fun makeIntent(ctx: Context, url: String, title: String): Intent =
-            Intent(ctx, ImageActivity::class.java).apply {
-                putExtra(EXTRA_URL, url)
-                putExtra(EXTRA_TITLE, title)
+        fun makeIntent(
+            ctx: Context,
+            urls: ArrayList<String>,
+            titles: ArrayList<String>,
+            index: Int,
+        ): Intent = Intent(ctx, ImageActivity::class.java).apply {
+            putStringArrayListExtra(EXTRA_URLS, urls)
+            putStringArrayListExtra(EXTRA_TITLES, titles)
+            putExtra(EXTRA_INDEX, index)
+        }
+    }
+}
+
+@Composable
+private fun ZoomableImage(url: String, title: String, loader: coil.ImageLoader) {
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+
+    val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+        scale = (scale * zoomChange).coerceIn(1f, 8f)
+        offset = if (scale > 1f) offset + panChange else Offset.Zero
+    }
+
+    SubcomposeAsyncImage(
+        model = ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+            .data(url)
+            .build(),
+        contentDescription = title,
+        imageLoader = loader,
+        contentScale = ContentScale.Fit,
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                translationX = offset.x
+                translationY = offset.y
             }
+            .transformable(transformState)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onDoubleTap = {
+                        if (scale > 1f) {
+                            scale = 1f
+                            offset = Offset.Zero
+                        } else {
+                            scale = 2.5f
+                        }
+                    },
+                )
+            },
+    ) {
+        when (painter.state) {
+            is AsyncImagePainter.State.Loading -> Box(
+                Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(color = Color.White)
+            }
+            is AsyncImagePainter.State.Error -> Box(
+                Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("Failed to load image", color = Color.White, fontSize = 14.sp)
+            }
+            else -> SubcomposeAsyncImageContent()
+        }
     }
 }

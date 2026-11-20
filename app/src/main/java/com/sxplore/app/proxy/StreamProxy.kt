@@ -240,7 +240,7 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
     }
 
     companion object {
-        private const val MAX_REFS = 32
+        private const val MAX_REFS = 1024
 
         private val VIDEO_MIME = mapOf(
             "mkv" to "video/x-matroska",
