@@ -7,6 +7,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
@@ -53,6 +54,7 @@ import coil.compose.SubcomposeAsyncImageContent
 import coil.decode.GifDecoder
 import coil.request.ImageRequest
 import kotlinx.coroutines.delay
+import java.util.concurrent.TimeUnit
 
 /**
  * Built-in image viewer with folder playlist.
@@ -73,7 +75,17 @@ class ImageActivity : ComponentActivity() {
         val titles = intent.getStringArrayListExtra(EXTRA_TITLES) ?: arrayListOf()
         val startIndex = intent.getIntExtra(EXTRA_INDEX, 0).coerceIn(0, urls.lastIndex)
 
+        // OkHttp defaults to a 10s read timeout, which is far too tight for
+        // slow remote SMB links (~10KB/s): the first bytes can legitimately
+        // take longer. Match the video player's generous timeouts.
+        val okHttp = okhttp3.OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .build()
+
         val loader = coil.ImageLoader.Builder(this)
+            .okHttpClient(okHttp)
             .components {
                 if (Build.VERSION.SDK_INT >= 28) add(GifDecoder.Factory())
             }
@@ -196,6 +208,7 @@ class ImageActivity : ComponentActivity() {
 private fun ZoomableImage(url: String, title: String, loader: coil.ImageLoader) {
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
+    var retryTick by remember { mutableIntStateOf(0) }
 
     val transformState = rememberTransformableState { zoomChange, panChange, _ ->
         scale = (scale * zoomChange).coerceIn(1f, 8f)
@@ -205,6 +218,7 @@ private fun ZoomableImage(url: String, title: String, loader: coil.ImageLoader) 
     SubcomposeAsyncImage(
         model = ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
             .data(url)
+            .setParameter("retry", retryTick)
             .build(),
         contentDescription = title,
         imageLoader = loader,
@@ -238,11 +252,27 @@ private fun ZoomableImage(url: String, title: String, loader: coil.ImageLoader) 
             ) {
                 CircularProgressIndicator(color = Color.White)
             }
-            is AsyncImagePainter.State.Error -> Box(
-                Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("Failed to load image", color = Color.White, fontSize = 14.sp)
+            is AsyncImagePainter.State.Error -> {
+                val err = (painter.state as AsyncImagePainter.State.Error).result.throwable
+                android.util.Log.e("SxploreImage", "Load failed: $url", err)
+                androidx.compose.foundation.layout.Column(
+                    Modifier
+                        .fillMaxSize()
+                        .clickable { retryTick++ },
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("Failed to load image", color = Color.White, fontSize = 14.sp)
+                    Text(
+                        err.message ?: err.javaClass.simpleName,
+                        color = Color(0xFFB0BEC5),
+                        fontSize = 11.sp,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                    )
+                    Text("Tap to retry", color = Color.White, fontSize = 12.sp)
+                }
             }
             else -> SubcomposeAsyncImageContent()
         }

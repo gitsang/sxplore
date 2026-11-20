@@ -235,7 +235,9 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
 
         companion object {
             private const val QUEUE_DEPTH = 16
-            private const val MIN_UNIT = 64 * 1024
+            // Small first unit so bytes reach the client quickly even on very
+            // slow links; grows adaptively toward maxChunk on fast links.
+            private const val MIN_UNIT = 16 * 1024
         }
     }
 
