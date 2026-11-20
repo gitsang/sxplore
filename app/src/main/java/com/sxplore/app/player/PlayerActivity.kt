@@ -46,6 +46,7 @@ import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.ui.PlayerView
@@ -70,9 +71,14 @@ class PlayerActivity : ComponentActivity() {
 
     private var isBuffering by mutableStateOf(true)
     private var isPlaying by mutableStateOf(false)
-    private var bufferedPct by mutableStateOf(0)
+    private var startPct by mutableStateOf(0)
+    private var bufferedAheadMs by mutableStateOf(0L)
     private var speedBps by mutableStateOf(0L)
     private var showLiveSpeed = true
+
+    // True once playback has actually started; a seek resets it because the
+    // start gate drops back to the (smaller) initial buffer requirement.
+    private var everPlayed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -119,6 +125,17 @@ class PlayerActivity : ComponentActivity() {
                     // More retries for flaky/slow networks before surfacing an error.
                     .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(6))
             )
+            // Explicit start gates so the UI can show "distance to playback start".
+            .setLoadControl(
+                DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(
+                        MIN_BUFFER_MS,
+                        MAX_BUFFER_MS,
+                        START_BUFFER_MS,
+                        REBUFFER_BUFFER_MS,
+                    )
+                    .build()
+            )
             .build()
         p.setAudioAttributes(
             AudioAttributes.Builder()
@@ -133,11 +150,22 @@ class PlayerActivity : ComponentActivity() {
         p.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 isBuffering = state == Player.STATE_BUFFERING
-                if (isBuffering) bufferedPct = p.bufferedPercentage
+                if (isBuffering) updateStartProgress(p)
             }
 
             override fun onIsPlayingChanged(playing: Boolean) {
                 isPlaying = playing
+                if (playing) everPlayed = true
+            }
+
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int,
+            ) {
+                if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                    everPlayed = false
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -147,12 +175,12 @@ class PlayerActivity : ComponentActivity() {
         player = p
 
         setContent {
-            // Poll buffer position and network speed for the overlays.
+            // Poll start progress and network speed for the overlays.
             LaunchedEffect(Unit) {
                 while (isActive) {
                     speedBps = speedMonitor.bytesPerSecond()
                     if (isBuffering) {
-                        bufferedPct = player?.bufferedPercentage ?: 0
+                        player?.let { updateStartProgress(it) }
                     }
                     delay(500)
                 }
@@ -204,9 +232,18 @@ class PlayerActivity : ComponentActivity() {
                             )
                             Spacer(Modifier.height(10.dp))
                             Text(
-                                "Buffering… $bufferedPct%",
+                                "Buffering… $startPct%",
                                 color = Color.White,
                                 fontSize = 14.sp,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "%.1fs / %.1fs to play".format(
+                                    bufferedAheadMs / 1000.0,
+                                    startTargetMs() / 1000.0,
+                                ),
+                                color = Color(0xFFB0BEC5),
+                                fontSize = 12.sp,
                             )
                             Spacer(Modifier.height(4.dp))
                             Text(
@@ -250,6 +287,16 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    /** Buffer requirement before playback may (re)start, matching LoadControl. */
+    private fun startTargetMs(): Int = if (everPlayed) REBUFFER_BUFFER_MS else START_BUFFER_MS
+
+    /** Progress toward playback start: buffered-ahead media vs the start gate. */
+    private fun updateStartProgress(p: ExoPlayer) {
+        val ahead = (p.bufferedPosition - p.currentPosition).coerceAtLeast(0L)
+        bufferedAheadMs = ahead
+        startPct = (ahead * 100 / startTargetMs()).toInt().coerceIn(0, 100)
+    }
+
     override fun onDestroy() {
         player?.release()
         player = null
@@ -262,6 +309,13 @@ class PlayerActivity : ComponentActivity() {
         private const val EXTRA_URL = "url"
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_MIME = "mime"
+
+        // LoadControl buffer durations (ms). The last two are the gates the
+        // buffering overlay measures progress against.
+        private const val MIN_BUFFER_MS = 15_000
+        private const val MAX_BUFFER_MS = 50_000
+        private const val START_BUFFER_MS = 2_500
+        private const val REBUFFER_BUFFER_MS = 5_000
 
         fun makeIntent(ctx: Context, url: String, title: String, mime: String): Intent =
             Intent(ctx, PlayerActivity::class.java).apply {
