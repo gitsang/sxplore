@@ -34,7 +34,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -43,47 +42,6 @@ import com.sxplore.app.util.formatDate
 import com.sxplore.app.util.formatSize
 import com.sxplore.app.vfs.SmbConnectionInfo
 import com.sxplore.app.vfs.VfsEntry
-
-@Composable
-fun SettingsDialog(vm: AppViewModel) {
-    val ctx = LocalContext.current
-    val versionName = remember {
-        runCatching {
-            ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName
-        }.getOrNull() ?: "?"
-    }
-    AlertDialog(
-        onDismissRequest = { vm.showSettings = false },
-        title = { Text("Settings") },
-        text = {
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Real-time network speed", fontSize = 15.sp)
-                        Text(
-                            "Show live download speed while playing",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(
-                        checked = vm.showLiveSpeed,
-                        onCheckedChange = { vm.setLiveSpeedEnabled(it) },
-                    )
-                }
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    "Version $versionName",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { vm.showSettings = false }) { Text("Done") }
-        },
-    )
-}
 
 @Composable
 fun NewTabDialog(vm: AppViewModel) {

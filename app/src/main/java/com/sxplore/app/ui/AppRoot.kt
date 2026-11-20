@@ -57,6 +57,11 @@ import kotlin.math.roundToInt
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppRoot(vm: AppViewModel) {
+    if (vm.showSettings) {
+        SettingsScreen(vm)
+        return
+    }
+
     val pagerState = rememberPagerState(pageCount = { vm.tabs.size })
     val snackbarHost = remember { SnackbarHostState() }
 
@@ -177,9 +182,6 @@ fun AppRoot(vm: AppViewModel) {
 
     // ---------- Dialogs ----------
 
-    if (vm.showSettings) {
-        SettingsDialog(vm)
-    }
     if (vm.showNewTab) {
         NewTabDialog(vm)
     }

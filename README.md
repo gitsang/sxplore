@@ -11,6 +11,9 @@ Android file manager inspired by X-plore. **Headline feature: SMB streaming play
 - ↗️ **External players**: hand off to MX Player / VLC etc. through the same streaming proxy — still no download
 - 📋 **File management**: copy / cut / paste (across local and SMB), rename, delete, new folder, properties
 - 🔐 **Encrypted credentials**: SMB accounts stored with EncryptedSharedPreferences (AES256-GCM)
+- 🧠 **AI live subtitles**: Whisper speech recognition via OpenAI-compatible API, with optional AI translation for bilingual subtitles (configurable base URL / key / model)
+- 💾 **Session restore**: optional remember-tabs-and-paths switch restores the previous layout on launch
+- ⚙️ **Full settings page**: general, AI subtitles and translation configuration
 
 ## How streaming playback works
 
@@ -57,6 +60,7 @@ On first launch, grant "All files access" (Android 11+) to browse local files; S
 ## Roadmap
 
 - [ ] Dual-pane layout (classic X-plore form)
+- [ ] On-device whisper.cpp recognition (currently API-based)
 - [ ] WebDAV / FTP / SFTP
 - [ ] Background playback / notification controls (MediaSession)
 - [ ] Playlists and continuous playback

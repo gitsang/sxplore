@@ -8,10 +8,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.sxplore.app.SxploreApp
+import com.sxplore.app.data.SavedTab
+import com.sxplore.app.data.SavedTabs
 import com.sxplore.app.player.ImageActivity
 import com.sxplore.app.player.PlayerActivity
 import com.sxplore.app.proxy.StreamProxy
@@ -23,6 +26,8 @@ import com.sxplore.app.vfs.Vfs
 import com.sxplore.app.vfs.VfsEntry
 import com.sxplore.app.vfs.VfsPaths
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -85,7 +90,62 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         refreshConnections()
-        addTab(container.newLocalVfs(), "Local storage")
+        if (!restoreTabs()) {
+            addTab(container.newLocalVfs(), "Local storage")
+        }
+        // Persist tab layout (debounced) so it can be restored on next launch.
+        viewModelScope.launch {
+            snapshotFlow { tabs.toList() to activeIndex }
+                .collectLatest {
+                    delay(800)
+                    if (container.settings.rememberTabs) persistTabs()
+                }
+        }
+    }
+
+    private fun restoreTabs(): Boolean {
+        if (!container.settings.rememberTabs) return false
+        val saved = container.settings.loadTabs() ?: return false
+        if (saved.tabs.isEmpty()) return false
+        val connections = container.connectionStore.list()
+        saved.tabs.forEach { st ->
+            val vfs = when (st.kind) {
+                "local" -> container.newLocalVfs()
+                "smb" -> {
+                    val info = connections.firstOrNull { it.id == st.connectionId } ?: return@forEach
+                    container.newSmbVfs(info)
+                }
+                else -> return@forEach
+            }
+            tabs.add(
+                TabUiState(
+                    id = nextId++, title = st.title, vfs = vfs,
+                    expanded = st.expanded.toSet(), currentDir = st.currentDir,
+                )
+            )
+            val idx = tabs.lastIndex
+            loadRoot(idx)
+            st.expanded.forEach { loadChildren(idx, it) }
+        }
+        if (tabs.isEmpty()) return false
+        activeIndex = saved.activeIndex.coerceIn(0, tabs.lastIndex)
+        return true
+    }
+
+    private fun persistTabs() {
+        val dto = SavedTabs(
+            tabs = tabs.map { t ->
+                SavedTab(
+                    kind = if (t.vfs is SmbVfs) "smb" else "local",
+                    connectionId = (t.vfs as? SmbVfs)?.info?.id ?: "",
+                    title = t.title,
+                    expanded = t.expanded.toList(),
+                    currentDir = t.currentDir,
+                )
+            },
+            activeIndex = activeIndex,
+        )
+        container.settings.saveTabs(dto)
     }
 
     // ---------- Tab management ----------

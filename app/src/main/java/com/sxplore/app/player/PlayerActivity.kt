@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
@@ -50,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -70,6 +72,9 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.ui.PlayerView
 import com.sxplore.app.SxploreApp
+import com.sxplore.app.caption.CaptionConfig
+import com.sxplore.app.caption.CaptionCue
+import com.sxplore.app.caption.CaptionEngine
 import com.sxplore.app.proxy.StreamProxy
 import com.sxplore.app.util.formatSpeed
 import kotlinx.coroutines.delay
@@ -105,18 +110,27 @@ class PlayerActivity : ComponentActivity() {
     private var showExtSubDialog by mutableStateOf(false)
 
     private var titles = arrayListOf<String>()
+    private var urls = arrayListOf<String>()
     private var subUrls = arrayListOf<String>()
     private var subTitles = arrayListOf<String>()
+
+    // AI live captions
+    private var aiSubsOn by mutableStateOf(false)
+    private var captionCues by mutableStateOf<List<CaptionCue>>(emptyList())
+    private var displayedCue by mutableStateOf<CaptionCue?>(null)
+    private var captionStatus by mutableStateOf<String?>(null)
+    private var captionEngine: CaptionEngine? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        val urls = intent.getStringArrayListExtra(EXTRA_URLS)
-        if (urls.isNullOrEmpty()) {
+        val intentUrls = intent.getStringArrayListExtra(EXTRA_URLS)
+        if (intentUrls.isNullOrEmpty()) {
             finish()
             return
         }
+        urls = intentUrls
         titles = intent.getStringArrayListExtra(EXTRA_TITLES) ?: arrayListOf()
         subUrls = intent.getStringArrayListExtra(EXTRA_SUB_URLS) ?: arrayListOf()
         subTitles = intent.getStringArrayListExtra(EXTRA_SUB_TITLES) ?: arrayListOf()
@@ -125,6 +139,7 @@ class PlayerActivity : ComponentActivity() {
 
         val container = (application as SxploreApp).container
         showLiveSpeed = container.settings.showLiveSpeed
+        aiSubsOn = container.settings.aiSubtitlesEnabled
         val speedMonitor = container.proxy.speedMonitor
 
         // Keep Wi-Fi out of power-save while streaming.
@@ -193,6 +208,7 @@ class PlayerActivity : ComponentActivity() {
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 currentTitle = titles.getOrElse(p.currentMediaItemIndex) { "" }
+                if (aiSubsOn) startCaptions(p)
             }
 
             override fun onPositionDiscontinuity(
@@ -202,6 +218,7 @@ class PlayerActivity : ComponentActivity() {
             ) {
                 if (reason == Player.DISCONTINUITY_REASON_SEEK) {
                     everPlayed = false
+                    if (aiSubsOn) startCaptions(p)
                 }
             }
 
@@ -210,6 +227,7 @@ class PlayerActivity : ComponentActivity() {
             }
         })
         player = p
+        if (aiSubsOn) startCaptions(p)
 
         setContent {
             LaunchedEffect(Unit) {
@@ -218,6 +236,8 @@ class PlayerActivity : ComponentActivity() {
                     if (isBuffering) {
                         player?.let { updateStartProgress(it) }
                     }
+                    val pos = player?.currentPosition ?: 0L
+                    displayedCue = captionCues.lastOrNull { pos >= it.startMs && pos <= it.endMs + 1500 }
                     delay(500)
                 }
             }
@@ -271,6 +291,13 @@ class PlayerActivity : ComponentActivity() {
                                 Icon(
                                     Icons.Filled.Subtitles, "Tracks and subtitles",
                                     Modifier.size(20.dp), tint = Color.White,
+                                )
+                            }
+                            IconButton(onClick = { toggleAiSubs(p) }) {
+                                Icon(
+                                    Icons.Filled.ClosedCaption, "AI live subtitles",
+                                    Modifier.size(20.dp),
+                                    tint = if (aiSubsOn) Color(0xFF64B5F6) else Color.White,
                                 )
                             }
                             IconButton(onClick = { cycleRepeat(p) }) {
@@ -327,6 +354,50 @@ class PlayerActivity : ComponentActivity() {
                         }
                     }
 
+                    // AI live captions overlay (original + translation).
+                    Column(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 72.dp, start = 16.dp, end = 16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        captionStatus?.let { msg ->
+                            Text(
+                                msg,
+                                color = Color(0xFFFFB74D),
+                                fontSize = 11.sp,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier
+                                    .background(Color(0x99000000), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                            )
+                            Spacer(Modifier.height(4.dp))
+                        }
+                        displayedCue?.let { cue ->
+                            Column(
+                                Modifier
+                                    .background(Color(0x99000000), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Text(
+                                    cue.text,
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                    textAlign = TextAlign.Center,
+                                )
+                                cue.translation?.let {
+                                    Text(
+                                        it,
+                                        color = Color(0xFFE0E0E0),
+                                        fontSize = 13.sp,
+                                        textAlign = TextAlign.Center,
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     errorMsg?.let { msg ->
                         Column(
                             Modifier.align(Alignment.Center).padding(24.dp),
@@ -376,6 +447,42 @@ class PlayerActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    private fun toggleAiSubs(p: ExoPlayer) {
+        aiSubsOn = !aiSubsOn
+        (application as SxploreApp).container.settings.aiSubtitlesEnabled = aiSubsOn
+        if (aiSubsOn) {
+            startCaptions(p)
+        } else {
+            captionEngine?.cancel()
+            captionEngine = null
+            captionCues = emptyList()
+            displayedCue = null
+            captionStatus = null
+        }
+    }
+
+    /** (Re)start the caption engine for the current item at the current position. */
+    private fun startCaptions(p: ExoPlayer) {
+        captionEngine?.cancel()
+        captionCues = emptyList()
+        displayedCue = null
+        captionStatus = null
+        val config = CaptionConfig.from((application as SxploreApp).container.settings)
+        if (config == null) {
+            captionStatus = "AI subtitles: set API base URL and key in Settings"
+            return
+        }
+        val url = urls.getOrElse(p.currentMediaItemIndex) { return }
+        captionEngine = CaptionEngine(
+            url = url,
+            startMs = p.currentPosition.coerceAtLeast(0L),
+            config = config,
+            playbackPositionMs = { player?.currentPosition ?: 0L },
+            onCues = { cues -> runOnUiThread { captionCues = cues } },
+            onStatus = { msg -> runOnUiThread { captionStatus = msg } },
+        ).also { it.start() }
     }
 
     private fun cycleRepeat(p: ExoPlayer) {
@@ -428,6 +535,8 @@ class PlayerActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        captionEngine?.cancel()
+        captionEngine = null
         player?.release()
         player = null
         runCatching { wifiLock?.release() }

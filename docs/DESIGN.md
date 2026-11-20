@@ -99,7 +99,26 @@ makes directory listings crawl. Fixes:
 - Low-latency Wi-Fi lock (`WIFI_MODE_FULL_LOW_LATENCY`) while the built-in player
   is active, keeping the radio out of power-save
 
-### 2.7 Custom tab strip (crash fix)
+### 2.7 AI live captions + bilingual translation
+
+`CaptionEngine` opens a second stream of the playing media, demuxes/decodes the
+audio track (MediaExtractor + MediaCodec), resamples to 16kHz mono PCM and sends
+~8s WAV chunks to an OpenAI-compatible `/audio/transcriptions` endpoint
+(Whisper; OpenAI or self-hosted). `verbose_json` segment timestamps are mapped
+to absolute media time. The decode loop runs up to 60s AHEAD of playback so
+captions are ready before the audio is heard. Optional translation uses
+`/chat/completions` with a line-preserving prompt; original + translated lines
+render as a bilingual overlay. Seek / next item restarts the engine at the new
+position. All endpoints/keys/models are configured in the settings page.
+
+### 2.8 Session restore
+
+With the "Remember tabs and paths" switch on, a debounced `snapshotFlow` watcher
+serializes tab layout (kind, saved SMB connection id, expanded paths, current
+dir, active index) to preferences; on launch the ViewModel rebuilds tabs and
+reloads root + expanded folders. SMB tabs restore only saved connections.
+
+### 2.9 Custom tab strip (crash fix)
 
 Material3 `ScrollableTabRow` throws `IndexOutOfBoundsException` at `TabRow.kt:502` when the tab count changes:
 its indicator reads `tabPositions[selectedTabIndex]` before the position list is re-measured for the new count
