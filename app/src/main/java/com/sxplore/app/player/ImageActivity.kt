@@ -8,9 +8,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroidSize
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -210,11 +213,6 @@ private fun ZoomableImage(url: String, title: String, loader: coil.ImageLoader) 
     var offset by remember { mutableStateOf(Offset.Zero) }
     var retryTick by remember { mutableIntStateOf(0) }
 
-    val transformState = rememberTransformableState { zoomChange, panChange, _ ->
-        scale = (scale * zoomChange).coerceIn(1f, 8f)
-        offset = if (scale > 1f) offset + panChange else Offset.Zero
-    }
-
     SubcomposeAsyncImage(
         model = ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
             .data(url)
@@ -231,7 +229,45 @@ private fun ZoomableImage(url: String, title: String, loader: coil.ImageLoader) 
                 translationX = offset.x
                 translationY = offset.y
             }
-            .transformable(transformState)
+            .pointerInput(Unit) {
+                // Pinch-zoom with two fingers at any scale; pan only while
+                // zoomed in. Single-finger drags at scale 1 are left
+                // unconsumed so the HorizontalPager can swipe prev/next.
+                // (transformable() would swallow those swipes.)
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    var pastSlop = false
+                    var zoomAcc = 1f
+                    var panAcc = Offset.Zero
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.changes.any { it.isConsumed }) break
+                        val pointers = event.changes.count { it.pressed }
+                        if (pointers == 0) break
+                        val zoomChange = event.calculateZoom()
+                        val panChange = event.calculatePan()
+                        val ours = pointers >= 2 || scale > 1f
+                        if (!pastSlop) {
+                            zoomAcc *= zoomChange
+                            panAcc += panChange
+                            val centroidSize = event.calculateCentroidSize(useCurrent = false)
+                            val zoomMotion = kotlin.math.abs(1 - zoomAcc) * centroidSize
+                            val panMotion = panAcc.getDistance()
+                            if (ours &&
+                                (zoomMotion > viewConfiguration.touchSlop ||
+                                    panMotion > viewConfiguration.touchSlop)
+                            ) {
+                                pastSlop = true
+                            }
+                        }
+                        if (pastSlop) {
+                            scale = (scale * zoomChange).coerceIn(1f, 8f)
+                            offset = if (scale > 1f) offset + panChange else Offset.Zero
+                            event.changes.forEach { it.consume() }
+                        }
+                    }
+                }
+            }
             .pointerInput(Unit) {
                 detectTapGestures(
                     onDoubleTap = {

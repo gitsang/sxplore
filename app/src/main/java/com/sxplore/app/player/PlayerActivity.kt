@@ -229,9 +229,15 @@ class PlayerActivity : ComponentActivity() {
                             PlayerView(ctx).apply {
                                 player = p
                                 useController = true
-                                setShowSubtitleButton(true)
                                 controllerShowTimeoutMs = 3000
                                 setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
+                                // Settings live in our top-right controls (speed /
+                                // tracks+external subs / repeat). Hide the native
+                                // track-selection entry points to avoid two competing
+                                // menus; keep native transport (play/seek/next/prev).
+                                setShowSubtitleButton(false)
+                                findViewById<android.view.View>(androidx.media3.ui.R.id.exo_settings)
+                                    ?.visibility = android.view.View.GONE
                             }
                         },
                         modifier = Modifier.fillMaxSize(),
