@@ -24,7 +24,10 @@ interface VfsRandomAccess : Closeable {
     val length: Long
 
     /** Reads up to buf.size bytes at offset; returns the count read, or -1 at EOF. */
-    fun readAt(offset: Long, buf: ByteArray): Int
+    fun readAt(offset: Long, buf: ByteArray): Int = readAt(offset, buf, 0, buf.size)
+
+    /** Reads up to len bytes at offset into buf[off..off+len); returns count read, or -1 at EOF. */
+    fun readAt(offset: Long, buf: ByteArray, off: Int, len: Int): Int
 }
 
 /**
@@ -36,6 +39,9 @@ interface Vfs : Closeable {
     /** Stable identifier, e.g. "local" or "smb://host/share". */
     val id: String
     val displayName: String
+
+    /** Preferred streaming chunk size (SMB: server-negotiated max read size). */
+    val preferredReadSize: Int get() = 1024 * 1024
 
     fun list(path: String): List<VfsEntry>
     fun stat(path: String): VfsEntry

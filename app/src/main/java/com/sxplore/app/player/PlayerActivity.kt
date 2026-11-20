@@ -2,6 +2,8 @@ package com.sxplore.app.player
 
 import android.content.Context
 import android.content.Intent
+import android.net.wifi.WifiManager
+import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -49,11 +51,27 @@ import androidx.media3.ui.PlayerView
 class PlayerActivity : ComponentActivity() {
 
     private var player: ExoPlayer? = null
+    private var wifiLock: WifiManager.WifiLock? = null
     private var errorMsg by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        // Keep Wi-Fi out of power-save while streaming: power-save adds
+        // latency spikes that cause constant re-buffering on SMB playback.
+        runCatching {
+            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            val mode = if (Build.VERSION.SDK_INT >= 29) {
+                WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+            } else {
+                WifiManager.WIFI_MODE_FULL_HIGH_PERF
+            }
+            wifiLock = wm.createWifiLock(mode, "sxplore:playback").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }
 
         val url = intent.getStringExtra(EXTRA_URL)
         if (url == null) {
@@ -142,6 +160,8 @@ class PlayerActivity : ComponentActivity() {
     override fun onDestroy() {
         player?.release()
         player = null
+        runCatching { wifiLock?.release() }
+        wifiLock = null
         super.onDestroy()
     }
 

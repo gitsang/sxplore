@@ -5,10 +5,13 @@ import android.webkit.MimeTypeMap
 import com.sxplore.app.vfs.Vfs
 import com.sxplore.app.vfs.VfsRandomAccess
 import fi.iki.elonen.NanoHTTPD
+import java.io.IOException
 import java.io.InputStream
 import java.util.UUID
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.TimeUnit
 
 /**
  * Local streaming proxy: binds only to 127.0.0.1 on a random port.
@@ -111,41 +114,109 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
 
         val partial = rangeHeader != null
         val status = if (partial) Response.Status.PARTIAL_CONTENT else Response.Status.OK
-        return newFixedLengthResponse(status, ref.mime, RaInputStream(ra, start, len), len).apply {
+        val chunk = minOf(ref.vfs.preferredReadSize, 1024 * 1024)
+        return newFixedLengthResponse(status, ref.mime, PrefetchInputStream(ra, start, len, chunk), len).apply {
             addHeader("Accept-Ranges", "bytes")
             if (partial) addHeader("Content-Range", "bytes $start-$end/$total")
         }
     }
 
-    /** Wraps a VfsRandomAccess as an InputStream limited to [start, start+len). */
-    private class RaInputStream(
+    /**
+     * Prefetching InputStream over a VfsRandomAccess, limited to [start, start+total).
+     *
+     * A background worker reads ahead in ~1MB chunks into a bounded queue, so
+     * SMB round-trip latency and Wi-Fi jitter are hidden from the player: the
+     * HTTP side consumes buffered chunks while the next ones are already in
+     * flight. Without prefetch, every small read waits a full RTT and playback
+     * constantly re-buffers.
+     */
+    private class PrefetchInputStream(
         private val ra: VfsRandomAccess,
         start: Long,
-        private var left: Long,
+        total: Long,
+        chunkSize: Int,
     ) : InputStream() {
-        private var pos = start
-        private val chunk = ByteArray(64 * 1024)
-        private val one = ByteArray(1)
+
+        private val queue = ArrayBlockingQueue<ByteArray>(QUEUE_DEPTH)
+        @Volatile private var failure: IOException? = null
+        @Volatile private var closed = false
+        @Volatile private var done = false
+
+        private var current: ByteArray? = null
+        private var currentPos = 0
+        private var remaining = total
+
+        private val worker = Thread({
+            try {
+                var pos = start
+                var left = total
+                while (!closed && left > 0) {
+                    val want = minOf(chunkSize.toLong(), left).toInt()
+                    val buf = ByteArray(want)
+                    var filled = 0
+                    while (filled < want && !closed) {
+                        val n = ra.readAt(pos + filled, buf, filled, want - filled)
+                        if (n <= 0) break
+                        filled += n
+                    }
+                    if (filled == 0) break
+                    queue.put(if (filled == want) buf else buf.copyOf(filled))
+                    pos += filled
+                    left -= filled
+                    if (filled < want) break // EOF
+                }
+            } catch (_: InterruptedException) {
+                // closed while blocked on the queue
+            } catch (e: Exception) {
+                failure = IOException("prefetch failed", e)
+            } finally {
+                done = true
+            }
+        }, "sxplore-prefetch").apply {
+            isDaemon = true
+            start()
+        }
 
         override fun read(): Int {
+            val one = ByteArray(1)
             val n = read(one, 0, 1)
             return if (n <= 0) -1 else one[0].toInt() and 0xFF
         }
 
         override fun read(b: ByteArray, off: Int, len: Int): Int {
-            if (left <= 0) return -1
-            val want = minOf(len.toLong(), left, chunk.size.toLong()).toInt()
-            val buf = if (want == chunk.size) chunk else ByteArray(want)
-            val n = ra.readAt(pos, buf)
-            if (n <= 0) return -1
-            System.arraycopy(buf, 0, b, off, n)
-            pos += n
-            left -= n
+            if (closed) throw IOException("stream closed")
+            if (remaining <= 0) return -1
+            while (current == null || currentPos >= current!!.size) {
+                val chunk = queue.poll(200, TimeUnit.MILLISECONDS)
+                if (chunk == null) {
+                    if (done) {
+                        failure?.let { throw it }
+                        return -1
+                    }
+                    if (closed) throw IOException("stream closed")
+                    continue
+                }
+                current = chunk
+                currentPos = 0
+            }
+            val c = current!!
+            val n = minOf(len, c.size - currentPos, remaining.toInt())
+            System.arraycopy(c, currentPos, b, off, n)
+            currentPos += n
+            remaining -= n
             return n
         }
 
         override fun close() {
+            if (closed) return
+            closed = true
+            worker.interrupt()
+            queue.clear()
             runCatching { ra.close() }
+        }
+
+        companion object {
+            private const val QUEUE_DEPTH = 4
         }
     }
 

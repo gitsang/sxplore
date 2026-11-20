@@ -84,7 +84,22 @@ Clipboard model: source (VFS + path + move flag) → paste into the target tab's
 `TransferEngine`: recursive plan → streamed file-by-file copy (128KB buffer) → progress callback (1MB throttle).
 Move = copy, then delete source on success.
 
-### 2.6 Custom tab strip (crash fix)
+### 2.6 Performance: negotiated buffers + prefetch pipeline
+
+Desktop SMB clients feel instant on the same NAS/Wi-Fi because they negotiate
+multi-MB read sizes and pipeline requests. smbj defaults to 64KB buffers, which
+turns streaming into hundreds of tiny round-trips (throughput ≈ 64KB / RTT) and
+makes directory listings crawl. Fixes:
+
+- `SmbConfig.withNegotiatedBufferSize()`: read/write/transact buffers follow the
+  server-negotiated maxima (typically 1–8MB), same as desktop clients
+- `PrefetchInputStream` in the proxy: a background worker reads ahead in 1MB
+  chunks into a 4-slot queue; the HTTP response consumes buffered chunks while
+  the next reads are already in flight, hiding RTT and Wi-Fi jitter
+- Low-latency Wi-Fi lock (`WIFI_MODE_FULL_LOW_LATENCY`) while the built-in player
+  is active, keeping the radio out of power-save
+
+### 2.7 Custom tab strip (crash fix)
 
 Material3 `ScrollableTabRow` throws `IndexOutOfBoundsException` at `TabRow.kt:502` when the tab count changes:
 its indicator reads `tabPositions[selectedTabIndex]` before the position list is re-measured for the new count

@@ -24,6 +24,7 @@ Android file manager inspired by X-plore. **Headline feature: SMB streaming play
 - A lightweight HTTP server (NanoHTTPD) listens only on `127.0.0.1`
 - Each player `Range: bytes=start-end` request becomes an offset SMB READ
 - Data is read and forwarded on the fly — **zero bytes written to disk**; seeking just reads from a new offset
+- Server-negotiated multi-MB read buffers + a 1MB×4 prefetch pipeline hide network latency, so playback streams smoothly instead of re-buffering
 - URLs carry a random token and are reachable only from this device, so other LAN devices cannot read them
 - The built-in player and external players share the exact same proxy URL
 

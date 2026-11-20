@@ -33,7 +33,17 @@ class SmbVfs(val info: SmbConnectionInfo) : Vfs {
     private val clientConfig: SmbConfig = SmbConfig.builder()
         .withTimeout(20, TimeUnit.SECONDS)
         .withSoTimeout(60, TimeUnit.SECONDS)
+        // Use the server-negotiated max read/write/transact sizes (multi-MB),
+        // like desktop SMB clients. The 64KB default turns streaming into
+        // hundreds of tiny round-trips and cripples throughput on Wi-Fi.
+        .withNegotiatedBufferSize()
         .build()
+
+    @Volatile
+    private var negotiatedMaxRead: Int = 1024 * 1024
+
+    override val preferredReadSize: Int
+        get() = negotiatedMaxRead.coerceIn(64 * 1024, 8 * 1024 * 1024)
 
     private var client: SMBClient? = null
     private var connection: Connection? = null
@@ -58,6 +68,7 @@ class SmbVfs(val info: SmbConnectionInfo) : Vfs {
         connection = conn
         session = sess
         share = ds
+        negotiatedMaxRead = conn.negotiatedProtocol.maxReadSize
         return ds
     }
 
@@ -121,9 +132,9 @@ class SmbVfs(val info: SmbConnectionInfo) : Vfs {
         val len = f.fileInformation.standardInformation.endOfFile
         return object : VfsRandomAccess {
             override val length: Long = len
-            override fun readAt(offset: Long, buf: ByteArray): Int {
-                if (offset >= len) return -1
-                val n = f.read(buf, offset).toInt()
+            override fun readAt(offset: Long, buf: ByteArray, off: Int, len: Int): Int {
+                if (offset >= length) return -1
+                val n = f.read(buf, offset, off, len).toInt()
                 return if (n <= 0) -1 else n
             }
             override fun close() {

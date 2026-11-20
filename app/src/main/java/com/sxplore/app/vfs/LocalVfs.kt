@@ -48,11 +48,11 @@ class LocalVfs : Vfs {
         val raf = RandomAccessFile(realFile(path), "r")
         return object : VfsRandomAccess {
             override val length: Long = raf.length()
-            override fun readAt(offset: Long, buf: ByteArray): Int {
+            override fun readAt(offset: Long, buf: ByteArray, off: Int, len: Int): Int {
                 if (offset >= length) return -1
                 synchronized(raf) {
                     raf.seek(offset)
-                    val n = raf.read(buf)
+                    val n = raf.read(buf, off, len)
                     return if (n <= 0) -1 else n
                 }
             }
