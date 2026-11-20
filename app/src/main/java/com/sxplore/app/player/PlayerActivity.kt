@@ -469,7 +469,19 @@ class PlayerActivity : ComponentActivity() {
         captionCues = emptyList()
         displayedCue = null
         captionStatus = null
-        val config = CaptionConfig.from((application as SxploreApp).container.settings)
+        val container = (application as SxploreApp).container
+        val settings = container.settings
+        val localPath = if (settings.whisperEngine == "local") {
+            val name = settings.whisperLocalModel
+            if (container.modelDownloader.isReady(name)) {
+                container.modelDownloader.modelFile(name).absolutePath
+            } else null
+        } else null
+        if (settings.whisperEngine == "local" && localPath == null) {
+            captionStatus = "AI subtitles: download a local Whisper model in Settings"
+            return
+        }
+        val config = CaptionConfig.from(settings, localPath)
         if (config == null) {
             captionStatus = "AI subtitles: set API base URL and key in Settings"
             return
@@ -481,7 +493,7 @@ class PlayerActivity : ComponentActivity() {
             config = config,
             playbackPositionMs = { player?.currentPosition ?: 0L },
             onCues = { cues -> runOnUiThread { captionCues = cues } },
-            onStatus = { msg -> runOnUiThread { captionStatus = msg } },
+            onStatus = { msg -> runOnUiThread { captionStatus = msg.ifBlank { null } } },
         ).also { it.start() }
     }
 

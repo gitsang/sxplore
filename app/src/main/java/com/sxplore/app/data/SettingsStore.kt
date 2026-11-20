@@ -55,6 +55,27 @@ class SettingsStore(context: Context) {
             prefs.edit().putString("whisper_language", value).apply()
         }
 
+    /** Recognition engine: "api" (OpenAI-compatible) or "local" (whisper.cpp). */
+    var whisperEngine: String
+        get() = prefs.getString("whisper_engine", "api") ?: "api"
+        set(value) {
+            prefs.edit().putString("whisper_engine", value).apply()
+        }
+
+    /** Selected local model: tiny / base / small. */
+    var whisperLocalModel: String
+        get() = prefs.getString("whisper_local_model", "base") ?: "base"
+        set(value) {
+            prefs.edit().putString("whisper_local_model", value).apply()
+        }
+
+    /** Model download mirror; hf-mirror.com is reachable from China. */
+    var modelDownloadSource: String
+        get() = prefs.getString("model_download_source", "https://hf-mirror.com") ?: "https://hf-mirror.com"
+        set(value) {
+            prefs.edit().putString("model_download_source", value).apply()
+        }
+
     // ---------- Translation (OpenAI-compatible chat API) ----------
 
     var translationEnabled: Boolean

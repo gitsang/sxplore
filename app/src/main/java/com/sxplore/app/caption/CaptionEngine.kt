@@ -39,6 +39,8 @@ data class CaptionConfig(
     val transKey: String,
     val transModel: String,
     val chunkSeconds: Int = 8,
+    /** Non-null = use on-device whisper.cpp with this model file. */
+    val localModelPath: String? = null,
 ) {
     companion object {
         /** Accepts bases with or without the /v1 suffix. */
@@ -48,11 +50,13 @@ data class CaptionConfig(
             return u
         }
 
-        /** null when Whisper is not configured. */
-        fun from(s: SettingsStore): CaptionConfig? {
+        /** null when the selected engine is not configured. */
+        fun from(s: SettingsStore, localModelPath: String?): CaptionConfig? {
+            val local = s.whisperEngine == "local"
+            if (local && localModelPath == null) return null
             val base = normalizeBase(s.whisperBaseUrl)
             val key = s.whisperApiKey.trim()
-            if (base.isEmpty() || key.isEmpty()) return null
+            if (!local && (base.isEmpty() || key.isEmpty())) return null
             val transBase = normalizeBase(s.translationBaseUrl.ifBlank { s.whisperBaseUrl })
             val transKey = s.translationApiKey.trim().ifBlank { key }
             return CaptionConfig(
@@ -60,11 +64,12 @@ data class CaptionConfig(
                 whisperKey = key,
                 whisperModel = s.whisperModel.ifBlank { "whisper-1" },
                 whisperLanguage = s.whisperLanguage.trim(),
-                translate = s.translationEnabled && transBase.isNotEmpty(),
+                translate = s.translationEnabled && transBase.isNotEmpty() && transKey.isNotEmpty(),
                 targetLang = s.translationTargetLang.ifBlank { "Chinese" },
                 transBase = transBase,
                 transKey = transKey,
                 transModel = s.translationModel.ifBlank { "gpt-4o-mini" },
+                localModelPath = if (local) localModelPath else null,
             )
         }
     }
@@ -95,6 +100,7 @@ class CaptionEngine(
     private val cues = CopyOnWriteArrayList<CaptionCue>()
     @Volatile private var cancelled = false
     private var thread: Thread? = null
+    private var whisperCtx: Long = 0L
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
@@ -148,6 +154,21 @@ class CaptionEngine(
             codec = MediaCodec.createDecoderByType(mime)
             codec.configure(format, null, null, 0)
             codec.start()
+
+            // On-device engine: load the ggml model once per run.
+            if (config.localModelPath != null) {
+                if (!WhisperLocal.available) {
+                    onStatus("AI subtitles: local engine unsupported on this device (arm64 only)")
+                    return
+                }
+                onStatus("Loading local Whisper model…")
+                whisperCtx = WhisperLocal.init(config.localModelPath)
+                if (whisperCtx == 0L) {
+                    onStatus("AI subtitles: failed to load model file")
+                    return
+                }
+                onStatus("")
+            }
 
             val info = MediaCodec.BufferInfo()
             val chunkTargetBytes = config.chunkSeconds * 16000 * 2
@@ -212,47 +233,72 @@ class CaptionEngine(
         } catch (e: Exception) {
             if (!cancelled) onStatus("AI subtitles: ${e.message ?: e.javaClass.simpleName}")
         } finally {
+            if (whisperCtx != 0L) {
+                runCatching { WhisperLocal.free(whisperCtx) }
+                whisperCtx = 0L
+            }
             runCatching { codec?.stop() }
             runCatching { codec?.release() }
             runCatching { extractor?.release() }
         }
     }
 
-    /** Recognize one WAV chunk, optionally translate, publish cues. */
+    /** Recognize one chunk (local whisper.cpp or Whisper API), optionally translate, publish cues. */
     private fun flushChunk(pcm: ByteArray, chunkStartMs: Long) {
-        val wav = wavBytes(pcm)
-        val builder = MultipartBody.Builder().setType(MultipartBody.FORM)
-            .addFormDataPart("file", "chunk.wav", wav.toRequestBody("audio/wav".toMediaType()))
-            .addFormDataPart("model", config.whisperModel)
-            .addFormDataPart("response_format", "verbose_json")
-        if (config.whisperLanguage.isNotBlank()) {
-            builder.addFormDataPart("language", config.whisperLanguage)
-        }
-        val req = Request.Builder()
-            .url("${config.whisperBase}/audio/transcriptions")
-            .header("Authorization", "Bearer ${config.whisperKey}")
-            .post(builder.build())
-            .build()
-        val json = client.newCall(req).execute().use { resp ->
-            val body = resp.body?.string() ?: ""
-            if (!resp.isSuccessful) {
-                throw IOException("Whisper HTTP ${resp.code}: ${body.take(200)}")
-            }
-            JSONObject(body)
-        }
-
         data class Line(val text: String, val startSec: Double, val endSec: Double)
         val lines = ArrayList<Line>()
-        val segments = json.optJSONArray("segments")
-        if (segments != null && segments.length() > 0) {
-            for (i in 0 until segments.length()) {
-                val s = segments.getJSONObject(i)
-                val t = s.optString("text").trim()
-                if (t.isNotEmpty()) lines.add(Line(t, s.optDouble("start", 0.0), s.optDouble("end", 0.0)))
+
+        if (whisperCtx != 0L) {
+            // ---- On-device whisper.cpp ----
+            val floats = FloatArray(pcm.size / 2)
+            val bb = ByteBuffer.wrap(pcm).order(ByteOrder.LITTLE_ENDIAN)
+            for (i in floats.indices) floats[i] = bb.getShort(i * 2) / 32768f
+            val result = WhisperLocal.transcribe(
+                whisperCtx, floats, config.whisperLanguage, WhisperLocal.defaultThreads(),
+            )
+            result.lines().forEach { line ->
+                if (line.isBlank()) return@forEach
+                val parts = line.split('\t')
+                if (parts.size >= 3) {
+                    val t0 = parts[0].toLongOrNull() ?: return@forEach
+                    val t1 = parts[1].toLongOrNull() ?: return@forEach
+                    val text = parts.subList(2, parts.size).joinToString(" ").trim()
+                    if (text.isNotEmpty()) lines.add(Line(text, t0 / 1000.0, t1 / 1000.0))
+                }
             }
         } else {
-            val t = json.optString("text").trim()
-            if (t.isNotEmpty()) lines.add(Line(t, 0.0, pcm.size / 32000.0))
+            // ---- Whisper API ----
+            val wav = wavBytes(pcm)
+            val builder = MultipartBody.Builder().setType(MultipartBody.FORM)
+                .addFormDataPart("file", "chunk.wav", wav.toRequestBody("audio/wav".toMediaType()))
+                .addFormDataPart("model", config.whisperModel)
+                .addFormDataPart("response_format", "verbose_json")
+            if (config.whisperLanguage.isNotBlank()) {
+                builder.addFormDataPart("language", config.whisperLanguage)
+            }
+            val req = Request.Builder()
+                .url("${config.whisperBase}/audio/transcriptions")
+                .header("Authorization", "Bearer ${config.whisperKey}")
+                .post(builder.build())
+                .build()
+            val json = client.newCall(req).execute().use { resp ->
+                val body = resp.body?.string() ?: ""
+                if (!resp.isSuccessful) {
+                    throw IOException("Whisper HTTP ${resp.code}: ${body.take(200)}")
+                }
+                JSONObject(body)
+            }
+            val segments = json.optJSONArray("segments")
+            if (segments != null && segments.length() > 0) {
+                for (i in 0 until segments.length()) {
+                    val s = segments.getJSONObject(i)
+                    val t = s.optString("text").trim()
+                    if (t.isNotEmpty()) lines.add(Line(t, s.optDouble("start", 0.0), s.optDouble("end", 0.0)))
+                }
+            } else {
+                val t = json.optString("text").trim()
+                if (t.isNotEmpty()) lines.add(Line(t, 0.0, pcm.size / 32000.0))
+            }
         }
         if (lines.isEmpty()) return
 
