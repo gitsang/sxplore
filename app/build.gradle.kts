@@ -5,6 +5,16 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+// Short git hash of the current checkout, used to tag dev builds (e.g. 0.1.0-g1a2b3c4).
+val gitHash: String = try {
+    val out = providers.exec {
+        commandLine("git", "rev-parse", "--short", "HEAD")
+    }.standardOutput.asText.get().trim()
+    out.ifEmpty { "unknown" }
+} catch (e: Exception) {
+    "unknown"
+}
+
 android {
     namespace = "com.sxplore.app"
     compileSdk = 34
@@ -18,6 +28,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Dev builds carry the git hash so any APK can be traced to a commit.
+            versionNameSuffix = "-g$gitHash"
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
