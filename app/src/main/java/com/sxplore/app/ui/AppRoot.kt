@@ -22,8 +22,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -81,11 +84,54 @@ fun AppRoot(vm: AppViewModel) {
                         IconButton(onClick = { vm.showSettings = true }) {
                             Icon(Icons.Filled.Settings, "Settings")
                         }
-                        IconButton(onClick = {
-                            vm.refreshConnections()
-                            vm.showNewTab = true
-                        }) {
-                            Icon(Icons.Filled.Add, "New tab")
+                        Box {
+                            IconButton(onClick = { vm.showOverflow = true }) {
+                                Icon(Icons.Filled.MoreVert, "More actions")
+                            }
+                            DropdownMenu(
+                                expanded = vm.showOverflow,
+                                onDismissRequest = { vm.showOverflow = false },
+                            ) {
+                                val n = vm.tabs.getOrNull(vm.activeIndex)?.selected?.size ?: 0
+                                if (n > 0) {
+                                    DropdownMenuItem(
+                                        text = { Text("Copy ($n)") },
+                                        onClick = {
+                                            vm.showOverflow = false
+                                            vm.setClipboardSelected(vm.activeIndex, move = false)
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Cut ($n)") },
+                                        onClick = {
+                                            vm.showOverflow = false
+                                            vm.setClipboardSelected(vm.activeIndex, move = true)
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Delete ($n)") },
+                                        onClick = {
+                                            vm.showOverflow = false
+                                            vm.batchDeleteConfirm = vm.activeIndex
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Clear selection") },
+                                        onClick = {
+                                            vm.showOverflow = false
+                                            vm.clearSelection(vm.activeIndex)
+                                        },
+                                    )
+                                    HorizontalDivider()
+                                }
+                                DropdownMenuItem(
+                                    text = { Text("Select all in current folder") },
+                                    onClick = {
+                                        vm.showOverflow = false
+                                        vm.selectAll(vm.activeIndex)
+                                    },
+                                )
+                            }
                         }
                     },
                 )
@@ -104,7 +150,8 @@ fun AppRoot(vm: AppViewModel) {
                             Icon(Icons.Filled.ContentPaste, null, Modifier.size(16.dp))
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                "${if (op.move) "Move" else "Copy"}: ${VfsPaths.name(op.srcPath)}",
+                                "${if (op.move) "Move" else "Copy"}: ${VfsPaths.name(op.sources.first().path)}" +
+                                    if (op.sources.size > 1) " +${op.sources.size - 1}" else "",
                                 Modifier.weight(1f),
                                 fontSize = 12.sp,
                                 maxLines = 1,
@@ -164,6 +211,7 @@ fun AppRoot(vm: AppViewModel) {
             onRefresh = { vm.dirAction = null; vm.refreshDir(idx, e.path) },
             onRename = { vm.dirAction = null; vm.renameTarget = idx to e },
             onDelete = { vm.dirAction = null; vm.deleteTarget = idx to e },
+            onInfo = { vm.dirAction = null; vm.infoTarget = e },
         )
     }
     vm.renameTarget?.let { (idx, e) ->
@@ -184,6 +232,13 @@ fun AppRoot(vm: AppViewModel) {
             entry = e,
             onDismiss = { vm.deleteTarget = null },
             onConfirm = { vm.deleteTarget = null; vm.delete(idx, e) },
+        )
+    }
+    vm.batchDeleteConfirm?.let { idx ->
+        BatchDeleteDialog(
+            count = vm.tabs.getOrNull(idx)?.selected?.size ?: 0,
+            onDismiss = { vm.batchDeleteConfirm = null },
+            onConfirm = { vm.batchDeleteConfirm = null; vm.batchDelete(idx) },
         )
     }
     vm.infoTarget?.let { e ->
@@ -216,11 +271,15 @@ private fun SxploreTabRow(vm: AppViewModel) {
     }
 
     Row(
-        Modifier
-            .fillMaxWidth()
-            .horizontalScroll(scrollState),
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        vm.tabs.forEachIndexed { i, tab ->
+        Row(
+            Modifier
+                .weight(1f)
+                .horizontalScroll(scrollState),
+        ) {
+            vm.tabs.forEachIndexed { i, tab ->
             val selected = i == vm.activeIndex
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -266,6 +325,13 @@ private fun SxploreTabRow(vm: AppViewModel) {
                         ),
                 )
             }
+            }
+        }
+        IconButton(onClick = {
+            vm.refreshConnections()
+            vm.showNewTab = true
+        }) {
+            Icon(Icons.Filled.Add, "New tab")
         }
     }
 }

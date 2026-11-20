@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.AlertDialog
@@ -99,6 +100,12 @@ fun NewTabDialog(vm: AppViewModel) {
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                        }
+                        IconButton(onClick = {
+                            vm.showNewTab = false
+                            vm.connectInitial = info
+                        }) {
+                            Icon(Icons.Filled.Edit, "Edit connection", Modifier.size(18.dp))
                         }
                         IconButton(onClick = { vm.deleteConnection(info.id) }) {
                             Icon(Icons.Filled.Delete, "Delete connection", Modifier.size(18.dp))
@@ -252,6 +259,7 @@ fun DirActionsDialog(
     onRefresh: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
+    onInfo: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -262,9 +270,28 @@ fun DirActionsDialog(
                 ActionItem("Refresh", onRefresh)
                 ActionItem("Rename", onRename)
                 ActionItem("Delete", onDelete)
+                ActionItem("Properties", onInfo)
             }
         },
         confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+fun BatchDeleteDialog(count: Int, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete confirmation") },
+        text = {
+            Text(
+                "Delete $count selected item(s)? Folders are deleted recursively. " +
+                    "This cannot be undone."
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

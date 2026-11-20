@@ -1,6 +1,10 @@
 package com.sxplore.app.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,9 +21,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -34,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -46,6 +54,7 @@ import com.sxplore.app.vfs.VfsEntry
 fun FileTreeScreen(vm: AppViewModel, index: Int) {
     val tab = vm.tabs.getOrNull(index) ?: return
     val rows = remember(tab) { vm.flatten(tab) }
+    val ctx = LocalContext.current
 
     Column(Modifier.fillMaxSize()) {
         // Current folder bar (paste destination)
@@ -68,6 +77,23 @@ fun FileTreeScreen(vm: AppViewModel, index: Int) {
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (tab.selected.isNotEmpty()) {
+                    Text(
+                        "${tab.selected.size} selected",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    IconButton(onClick = { vm.clearSelection(index) }) {
+                        Icon(Icons.Filled.Close, "Clear selection", Modifier.size(16.dp))
+                    }
+                }
+                IconButton(onClick = {
+                    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("path", vm.currentPathText(index)))
+                    vm.snackbar = "Path copied"
+                }) {
+                    Icon(Icons.Filled.ContentCopy, "Copy path", Modifier.size(18.dp))
+                }
                 IconButton(onClick = { vm.refreshAll(index) }) {
                     Icon(Icons.Filled.Refresh, "Refresh", Modifier.size(18.dp))
                 }
@@ -109,19 +135,28 @@ private fun TreeRowItem(vm: AppViewModel, index: Int, tab: TabUiState, row: Tree
     val e = row.entry
     val expanded = e.path in tab.expanded
     val loading = e.path in tab.loading
+    val selected = e.path in tab.selected
+    val selectionMode = tab.selected.isNotEmpty()
 
     Row(
         Modifier
             .fillMaxWidth()
+            .background(
+                if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
+            )
             .combinedClickable(
                 onClick = {
-                    if (e.isDir) vm.toggleDir(index, e) else vm.fileAction = index to e
+                    when {
+                        selectionMode -> vm.toggleSelect(index, e.path)
+                        e.isDir -> vm.toggleDir(index, e)
+                        else -> vm.fileAction = index to e
+                    }
                 },
                 onLongClick = {
-                    if (e.isDir) vm.dirAction = index to e else vm.fileAction = index to e
+                    if (e.isDir) vm.dirAction = index to e else vm.toggleSelect(index, e.path)
                 },
             )
-            .padding(start = (4 + row.depth * 18).dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            .padding(start = (4 + row.depth * 18).dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (e.isDir) {
@@ -152,16 +187,35 @@ private fun TreeRowItem(vm: AppViewModel, index: Int, tab: TabUiState, row: Tree
         Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) {
             Text(e.name, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (!e.isDir) {
-                Text(
-                    "${formatSize(e.size)} · ${formatDate(e.lastModified)}",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                )
-            }
+            Text(
+                subtitleFor(e, tab),
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
+        Checkbox(
+            checked = selected,
+            onCheckedChange = { vm.toggleSelect(index, e.path) },
+        )
     }
+}
+
+/**
+ * Files: size + modified date. Folders: modified date + child counts
+ * (counts shown once the folder's children are cached, i.e. after expanding;
+ * no extra network requests are made just for counting).
+ */
+private fun subtitleFor(e: VfsEntry, tab: TabUiState): String {
+    val date = formatDate(e.lastModified)
+    if (!e.isDir) return "${formatSize(e.size)} · $date"
+    val kids = tab.children[e.path] ?: return date
+    val nd = kids.count { it.isDir }
+    val nf = kids.size - nd
+    val dirs = "$nd " + if (nd == 1) "folder" else "folders"
+    val files = "$nf " + if (nf == 1) "file" else "files"
+    return "$date · $dirs, $files"
 }
 
 private fun isVideo(name: String): Boolean {

@@ -34,13 +34,16 @@ data class TabUiState(
     val expanded: Set<String> = emptySet(),
     val loading: Set<String> = emptySet(),
     val currentDir: String = "/",
+    val selected: Set<String> = emptySet(),
     val rootLoaded: Boolean = false,
     val rootError: String? = null,
 )
 
 data class TreeRow(val entry: VfsEntry, val depth: Int)
 
-data class ClipboardOp(val srcVfs: Vfs, val srcPath: String, val move: Boolean)
+data class ClipboardSource(val vfs: Vfs, val path: String)
+
+data class ClipboardOp(val sources: List<ClipboardSource>, val move: Boolean)
 
 data class TransferProgress(val label: String, val done: Long, val total: Long)
 
@@ -74,6 +77,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var newFolderDir by mutableStateOf<Pair<Int, String>?>(null)
     var deleteTarget by mutableStateOf<Pair<Int, VfsEntry>?>(null)
     var infoTarget by mutableStateOf<VfsEntry?>(null)
+    var showOverflow by mutableStateOf(false)
+    var batchDeleteConfirm by mutableStateOf<Int?>(null)
 
     private var nextId = 1L
 
@@ -212,6 +217,51 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return out
     }
 
+    // ---------- Selection ----------
+
+    fun toggleSelect(index: Int, path: String) {
+        update(index) {
+            it.copy(selected = if (path in it.selected) it.selected - path else it.selected + path)
+        }
+    }
+
+    fun clearSelection(index: Int) {
+        update(index) { it.copy(selected = emptySet()) }
+    }
+
+    fun selectAll(index: Int) {
+        val tab = tabs.getOrNull(index) ?: return
+        val dir = tab.currentDir
+        val cached = if (dir == "/") tab.rootEntries else tab.children[dir]
+        if (cached != null) {
+            update(index) { it.copy(selected = cached.map { e -> e.path }.toSet()) }
+        } else {
+            viewModelScope.launch {
+                try {
+                    val entries = withContext(Dispatchers.IO) { tab.vfs.list(dir) }
+                    update(index) {
+                        it.copy(
+                            children = it.children + (dir to entries),
+                            selected = entries.map { e -> e.path }.toSet(),
+                        )
+                    }
+                } catch (e: Exception) {
+                    snackbar = "Load failed: ${e.message}"
+                }
+            }
+        }
+    }
+
+    /** Human-readable full path of the tab's current folder (for copying). */
+    fun currentPathText(index: Int): String {
+        val tab = tabs.getOrNull(index) ?: return ""
+        return when (val vfs = tab.vfs) {
+            is SmbVfs -> "smb://${vfs.info.displayHost}/${vfs.info.share}${tab.currentDir}"
+            is LocalVfs -> vfs.realFile(tab.currentDir).absolutePath
+            else -> tab.currentDir
+        }
+    }
+
     // ---------- Playback ----------
 
     private fun streamUrl(index: Int, e: VfsEntry): String {
@@ -263,8 +313,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- File operations ----------
 
     fun setClipboard(index: Int, e: VfsEntry, move: Boolean) {
-        clipboard = ClipboardOp(tabs[index].vfs, e.path, move)
+        clipboard = ClipboardOp(listOf(ClipboardSource(tabs[index].vfs, e.path)), move)
         snackbar = if (move) "Cut: ${e.name} — open a destination folder and tap Paste" else "Copied: ${e.name} — open a destination folder and tap Paste"
+    }
+
+    fun setClipboardSelected(index: Int, move: Boolean) {
+        val tab = tabs.getOrNull(index) ?: return
+        if (tab.selected.isEmpty()) return
+        clipboard = ClipboardOp(tab.selected.map { ClipboardSource(tab.vfs, it) }, move)
+        snackbar = "${if (move) "Cut" else "Copied"} ${tab.selected.size} item(s) — open a destination folder and tap Paste"
     }
 
     fun paste() {
@@ -272,22 +329,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val idx = activeIndex
         val tab = tabs.getOrNull(idx) ?: return
         val destDir = tab.currentDir
-        if (op.srcVfs.id == tab.vfs.id && VfsPaths.parent(op.srcPath) == destDir) {
+        val sources = op.sources.filterNot {
+            it.vfs.id == tab.vfs.id && VfsPaths.parent(it.path) == destDir
+        }
+        if (sources.isEmpty()) {
             snackbar = "Source and destination folders are the same"
             return
         }
         viewModelScope.launch {
             transfer = TransferProgress("Preparing…", 0, 0)
             try {
-                withContext(Dispatchers.IO) {
-                    TransferEngine.copy(op.srcVfs, op.srcPath, tab.vfs, destDir) { done, total ->
-                        transfer = TransferProgress(if (op.move) "Moving" else "Copying", done, total)
+                sources.forEachIndexed { i, src ->
+                    val label = "${if (op.move) "Moving" else "Copying"} (${i + 1}/${sources.size})"
+                    withContext(Dispatchers.IO) {
+                        TransferEngine.copy(src.vfs, src.path, tab.vfs, destDir) { done, total ->
+                            transfer = TransferProgress(label, done, total)
+                        }
+                    }
+                    if (op.move) {
+                        withContext(Dispatchers.IO) { src.vfs.delete(src.path) }
                     }
                 }
                 if (op.move) {
-                    withContext(Dispatchers.IO) { op.srcVfs.delete(op.srcPath) }
                     clipboard = null
-                    tabs.forEachIndexed { i, t -> if (t.vfs.id == op.srcVfs.id) refreshAll(i) }
+                    val ids = sources.map { it.vfs.id }.toSet()
+                    tabs.forEachIndexed { i, t -> if (t.vfs.id in ids) refreshAll(i) }
                 }
                 refreshDir(idx, destDir)
                 snackbar = "Transfer complete"
@@ -295,6 +361,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 snackbar = "Transfer failed: ${e.message}"
             } finally {
                 transfer = null
+            }
+        }
+    }
+
+    fun batchDelete(index: Int) {
+        val tab = tabs.getOrNull(index) ?: return
+        val paths = tab.selected.toList()
+        if (paths.isEmpty()) return
+        viewModelScope.launch {
+            var failed = 0
+            withContext(Dispatchers.IO) {
+                paths.forEach { p ->
+                    runCatching { tab.vfs.delete(p) }.onFailure { failed++ }
+                }
+            }
+            val gone = paths.toSet()
+            update(index) {
+                it.copy(selected = emptySet(), expanded = it.expanded - gone, children = it.children - gone)
+            }
+            refreshAll(index)
+            snackbar = if (failed == 0) {
+                "Deleted ${paths.size} item(s)"
+            } else {
+                "Deleted ${paths.size - failed} item(s), $failed failed"
             }
         }
     }
