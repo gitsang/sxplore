@@ -125,7 +125,18 @@ class CaptionEngine(
         var codec: MediaCodec? = null
         try {
             extractor = MediaExtractor()
-            extractor.setDataSource(url)
+            var openTries = 0
+            while (true) {
+                try {
+                    extractor.setDataSource(url)
+                    break
+                } catch (e: Exception) {
+                    openTries++
+                    if (cancelled || openTries >= 3) throw e
+                    com.sxplore.app.util.DebugLog.w("Captions", "extractor open failed (attempt $openTries): ${e.message}")
+                    Thread.sleep(600)
+                }
+            }
             var audioTrack = -1
             for (i in 0 until extractor.trackCount) {
                 val mime = extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME) ?: ""

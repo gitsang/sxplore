@@ -169,6 +169,7 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
                     ra = h
                     return h
                 } catch (e: Exception) {
+                    if (closed) return null
                     attempt++
                     DebugLog.w("SxploreProxy", "[$logTag] open failed (attempt $attempt): ${e.message}")
                     if (attempt >= maxAttempts) {
@@ -183,6 +184,15 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
                 }
             }
             return null
+        }
+
+        private fun isInterrupt(e: Throwable?): Boolean {
+            var t = e
+            while (t != null) {
+                if (t is InterruptedException) return true
+                t = t.cause
+            }
+            return false
         }
 
         private val worker = Thread({
@@ -206,7 +216,10 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
                         val n = try {
                             handle!!.readAt(pos + filled, buf, filled, want - filled)
                         } catch (e: Exception) {
-                            // Reopen and retry the same offset; do not kill the stream.
+                            // Stream intentionally closed, or thread interrupted:
+                            // exit quietly. NEVER retry here — and close() must not
+                            // interrupt us inside smbj (see close() comment).
+                            if (closed || isInterrupt(e)) return@Thread
                             DebugLog.w("SxploreProxy", "[$logTag] read failed at ${pos + filled}: ${e.message}; reopening")
                             runCatching { handle!!.close() }
                             handle = openWithRetry(3) ?: throw IOException("reopen failed", e)
@@ -222,7 +235,13 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
                     }
                     val elapsed = SystemClock.elapsedRealtime() - t0
                     if (filled == 0) break
-                    queue.put(if (filled == want) buf else buf.copyOf(filled))
+                    val chunk = if (filled == want) buf else buf.copyOf(filled)
+                    // Offer with timeout (not put) so a vanished reader can't
+                    // strand the worker forever.
+                    while (!closed && !queue.offer(chunk, 200, TimeUnit.MILLISECONDS)) {
+                        // wait for consumer space
+                    }
+                    if (closed) return@Thread
                     pos += filled
                     left -= filled
                     if (filled < want) break // EOF
@@ -233,12 +252,14 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
                         else -> unit
                     }
                 }
-                DebugLog.d("SxploreProxy", "[$logTag] worker finished, left=$left closed=$closed")
+                if (!closed) DebugLog.d("SxploreProxy", "[$logTag] worker finished, left=$left")
             } catch (_: InterruptedException) {
-                // closed while blocked on the queue
+                // exit quietly
             } catch (e: Exception) {
-                DebugLog.e("SxploreProxy", "[$logTag] prefetch failed", e)
-                failure = IOException("prefetch failed", e)
+                if (!closed) {
+                    DebugLog.e("SxploreProxy", "[$logTag] prefetch failed", e)
+                    failure = IOException("prefetch failed", e)
+                }
             } finally {
                 done = true
             }
@@ -280,9 +301,14 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
         override fun close() {
             if (closed) return
             closed = true
-            worker.interrupt()
             queue.clear()
             runCatching { ra?.close() }
+            // IMPORTANT: do NOT interrupt the worker. Interrupting a thread
+            // inside smbj corrupts the shared connection's sequence window
+            // and cascades InterruptedException to EVERY other stream on the
+            // same SMB session (playback + captions all die). The worker
+            // notices `closed` between reads and exits on its own; closing
+            // the handle above unblocks most in-flight reads promptly.
         }
 
         companion object {
