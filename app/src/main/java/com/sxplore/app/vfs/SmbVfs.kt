@@ -11,6 +11,7 @@ import com.hierynomus.smbj.auth.AuthenticationContext
 import com.hierynomus.smbj.connection.Connection
 import com.hierynomus.smbj.session.Session
 import com.hierynomus.smbj.share.DiskShare
+import com.sxplore.app.util.DebugLog
 import java.io.FilterInputStream
 import java.io.FilterOutputStream
 import java.io.InputStream
@@ -71,6 +72,10 @@ class SmbVfs(val info: SmbConnectionInfo) : Vfs {
         session = sess
         share = ds
         negotiatedMaxRead = conn.negotiatedProtocol.maxReadSize
+        com.sxplore.app.util.DebugLog.d(
+            "SxploreSmb",
+            "connected ${info.displayHost}/${info.share} dialect=${conn.negotiatedProtocol.dialect} maxRead=$negotiatedMaxRead",
+        )
         return ds
     }
 
@@ -85,10 +90,10 @@ class SmbVfs(val info: SmbConnectionInfo) : Vfs {
         } catch (e: Exception) {
             val s = share
             if (s != null && s.isConnected) {
-                android.util.Log.w("SxploreSmb", "op failed on healthy session, retrying: ${e.message}")
+                DebugLog.w("SxploreSmb", "op failed on healthy session, retrying: ${e.message}")
                 block(s)
             } else {
-                android.util.Log.w("SxploreSmb", "session lost, reconnecting: ${e.message}")
+                DebugLog.w("SxploreSmb", "session lost, reconnecting: ${e.message}")
                 synchronized(this) { closeQuietly() }
                 block(share())
             }

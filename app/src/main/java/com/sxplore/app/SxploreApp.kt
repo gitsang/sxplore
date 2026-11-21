@@ -6,6 +6,7 @@ import com.sxplore.app.data.ConnectionStore
 import com.sxplore.app.data.SettingsStore
 import com.sxplore.app.caption.ModelDownloader
 import com.sxplore.app.proxy.StreamProxy
+import com.sxplore.app.util.DebugLog
 import com.sxplore.app.vfs.LocalVfs
 import com.sxplore.app.vfs.SmbConnectionInfo
 import com.sxplore.app.vfs.SmbVfs
@@ -18,6 +19,7 @@ class SxploreApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        DebugLog.init(this, container.settings.debugMode)
     }
 }
 

@@ -231,7 +231,10 @@ class CaptionEngine(
         } catch (e: InterruptedException) {
             // cancelled
         } catch (e: Exception) {
-            if (!cancelled) onStatus("AI subtitles: ${e.message ?: e.javaClass.simpleName}")
+            if (!cancelled) {
+                com.sxplore.app.util.DebugLog.e("Captions", "engine failed", e)
+                onStatus("AI subtitles: ${e.message ?: e.javaClass.simpleName}")
+            }
         } finally {
             if (whisperCtx != 0L) {
                 runCatching { WhisperLocal.free(whisperCtx) }
@@ -351,7 +354,10 @@ class CaptionEngine(
             val out = content.trim().lines().map { it.trim() }.filter { it.isNotEmpty() }
             if (out.size == lines.size) out else null
         } catch (e: Exception) {
-            if (!cancelled) onStatus("Translation: ${e.message ?: e.javaClass.simpleName}")
+            if (!cancelled) {
+                com.sxplore.app.util.DebugLog.w("Captions", "translation failed: ${e.message}")
+                onStatus("Translation: ${e.message ?: e.javaClass.simpleName}")
+            }
             null
         }
     }

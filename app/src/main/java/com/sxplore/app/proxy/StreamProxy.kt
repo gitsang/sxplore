@@ -3,6 +3,7 @@ package com.sxplore.app.proxy
 import android.net.Uri
 import android.os.SystemClock
 import android.webkit.MimeTypeMap
+import com.sxplore.app.util.DebugLog
 import com.sxplore.app.vfs.SmbVfs
 import com.sxplore.app.vfs.Vfs
 import com.sxplore.app.vfs.VfsRandomAccess
@@ -111,7 +112,7 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
         }
 
         val len = end - start + 1
-        android.util.Log.d("SxploreProxy", "GET ${ref.path} range=$rangeHeader start=$start len=$len")
+        DebugLog.d("SxploreProxy", "GET ${ref.path} range=$rangeHeader start=$start len=$len")
 
         val partial = rangeHeader != null
         val status = if (partial) Response.Status.PARTIAL_CONTENT else Response.Status.OK
@@ -169,7 +170,7 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
                     return h
                 } catch (e: Exception) {
                     attempt++
-                    android.util.Log.w("SxploreProxy", "[$logTag] open failed (attempt $attempt): ${e.message}")
+                    DebugLog.w("SxploreProxy", "[$logTag] open failed (attempt $attempt): ${e.message}")
                     if (attempt >= maxAttempts) {
                         failure = IOException("open failed after $attempt attempts", e)
                         return null
@@ -190,7 +191,7 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
                 val tOpen = SystemClock.elapsedRealtime()
                 handle = openWithRetry(4)
                 if (handle == null) return@Thread
-                android.util.Log.d("SxploreProxy", "[$logTag] opened in ${SystemClock.elapsedRealtime() - tOpen}ms, streaming $total bytes from $start")
+                DebugLog.d("SxploreProxy", "[$logTag] opened in ${SystemClock.elapsedRealtime() - tOpen}ms, streaming $total bytes from $start")
 
                 var pos = start
                 var left = total
@@ -206,14 +207,14 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
                             handle!!.readAt(pos + filled, buf, filled, want - filled)
                         } catch (e: Exception) {
                             // Reopen and retry the same offset; do not kill the stream.
-                            android.util.Log.w("SxploreProxy", "[$logTag] read failed at ${pos + filled}: ${e.message}; reopening")
+                            DebugLog.w("SxploreProxy", "[$logTag] read failed at ${pos + filled}: ${e.message}; reopening")
                             runCatching { handle!!.close() }
                             handle = openWithRetry(3) ?: throw IOException("reopen failed", e)
                             continue
                         }
                         if (n <= 0) break
                         if (!firstByteLogged) {
-                            android.util.Log.d("SxploreProxy", "[$logTag] first $n bytes after ${SystemClock.elapsedRealtime() - t0}ms")
+                            DebugLog.d("SxploreProxy", "[$logTag] first $n bytes after ${SystemClock.elapsedRealtime() - t0}ms")
                             firstByteLogged = true
                         }
                         filled += n
@@ -232,11 +233,11 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
                         else -> unit
                     }
                 }
-                android.util.Log.d("SxploreProxy", "[$logTag] worker finished, left=$left closed=$closed")
+                DebugLog.d("SxploreProxy", "[$logTag] worker finished, left=$left closed=$closed")
             } catch (_: InterruptedException) {
                 // closed while blocked on the queue
             } catch (e: Exception) {
-                android.util.Log.e("SxploreProxy", "[$logTag] prefetch failed", e)
+                DebugLog.e("SxploreProxy", "[$logTag] prefetch failed", e)
                 failure = IOException("prefetch failed", e)
             } finally {
                 done = true

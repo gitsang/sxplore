@@ -223,6 +223,7 @@ class PlayerActivity : ComponentActivity() {
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                com.sxplore.app.util.DebugLog.e("Player", "Playback error: ${error.errorCodeName}", error)
                 errorMsg = "Playback failed: ${error.errorCodeName}\n${error.message}"
             }
         })

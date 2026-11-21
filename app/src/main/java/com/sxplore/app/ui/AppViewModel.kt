@@ -176,6 +176,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 activeIndex = tabs.lastIndex
                 onDone(null)
             } catch (e: Exception) {
+                com.sxplore.app.util.DebugLog.e("Smb", "connect failed: ${info.displayHost}/${info.share}", e)
                 runCatching { vfs.close() }
                 onDone(e.message ?: "Connection failed")
             }
@@ -508,6 +509,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 refreshDir(idx, destDir)
                 snackbar = "Transfer complete"
             } catch (e: Exception) {
+                com.sxplore.app.util.DebugLog.e("Transfer", "transfer failed", e)
                 snackbar = "Transfer failed: ${e.message}"
             } finally {
                 transfer = null

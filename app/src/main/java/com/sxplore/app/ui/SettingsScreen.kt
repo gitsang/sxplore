@@ -1,5 +1,7 @@
 package com.sxplore.app.ui
 
+import android.content.Intent
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -37,8 +39,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.sxplore.app.SxploreApp
 import com.sxplore.app.caption.ModelDownloader
+import com.sxplore.app.util.DebugLog
+import com.sxplore.app.util.formatSize
+import java.io.File
 
 /** Full settings page (replaces the old dialog). */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -89,6 +95,47 @@ fun SettingsScreen(vm: AppViewModel) {
                 checked = vm.showLiveSpeed,
                 onChange = { vm.setLiveSpeedEnabled(it) },
             )
+            var debugOn by remember { mutableStateOf(settings.debugMode) }
+            SwitchRow(
+                title = "Debug mode",
+                subtitle = "Write diagnostic logs to a file (proxy / SMB / player / captions)",
+                checked = debugOn,
+                onChange = {
+                    debugOn = it
+                    settings.debugMode = it
+                    DebugLog.enabled = it
+                    if (it) DebugLog.d("App", "debug mode enabled")
+                },
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = {
+                    val zip = File(ctx.cacheDir, "sxplore-logs.zip")
+                    if (!DebugLog.exportZip(zip)) {
+                        Toast.makeText(
+                            ctx,
+                            "No logs yet — enable Debug mode and reproduce the issue first",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    } else {
+                        val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".fileprovider", zip)
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "application/zip"
+                            putExtra(Intent.EXTRA_STREAM, uri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        ctx.startActivity(Intent.createChooser(send, "Export logs"))
+                    }
+                }) { Text("Export logs") }
+                TextButton(onClick = {
+                    DebugLog.clear()
+                    Toast.makeText(ctx, "Logs cleared", Toast.LENGTH_SHORT).show()
+                }) { Text("Clear logs") }
+                Text(
+                    formatSize(DebugLog.totalSize()),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
             // ---------- AI live captions ----------
             SectionHeader("AI live subtitles (Whisper)")

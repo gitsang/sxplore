@@ -290,7 +290,7 @@ private fun ZoomableImage(url: String, title: String, loader: coil.ImageLoader) 
             }
             is AsyncImagePainter.State.Error -> {
                 val err = (painter.state as AsyncImagePainter.State.Error).result.throwable
-                android.util.Log.e("SxploreImage", "Load failed: $url", err)
+                com.sxplore.app.util.DebugLog.e("SxploreImage", "Load failed: $url", err)
                 androidx.compose.foundation.layout.Column(
                     Modifier
                         .fillMaxSize()

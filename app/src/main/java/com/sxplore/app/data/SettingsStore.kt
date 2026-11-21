@@ -22,6 +22,13 @@ class SettingsStore(context: Context) {
             prefs.edit().putBoolean("remember_tabs", value).apply()
         }
 
+    /** Write diagnostic logs to an exportable file. */
+    var debugMode: Boolean
+        get() = prefs.getBoolean("debug_mode", false)
+        set(value) {
+            prefs.edit().putBoolean("debug_mode", value).apply()
+        }
+
     // ---------- AI live captions (Whisper via OpenAI-compatible API) ----------
 
     var aiSubtitlesEnabled: Boolean
