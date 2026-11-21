@@ -291,7 +291,10 @@ class StreamProxy : NanoHTTPD("127.0.0.1", 0) {
                 currentPos = 0
             }
             val c = current!!
-            val n = minOf(len, c.size - currentPos, remaining.toInt())
+            // Compute in Long: remaining can exceed Int.MAX_VALUE for ranges
+            // over 2GB; remaining.toInt() would overflow negative and abort
+            // the connection ("unexpected end of stream" on seeks into 2-4GB).
+            val n = minOf(len.toLong(), (c.size - currentPos).toLong(), remaining).toInt()
             System.arraycopy(c, currentPos, b, off, n)
             currentPos += n
             remaining -= n

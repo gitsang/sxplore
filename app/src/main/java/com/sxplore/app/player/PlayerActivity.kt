@@ -494,7 +494,10 @@ class PlayerActivity : ComponentActivity() {
             config = config,
             playbackPositionMs = { player?.currentPosition ?: 0L },
             onCues = { cues -> runOnUiThread { captionCues = cues } },
-            onStatus = { msg -> runOnUiThread { captionStatus = msg.ifBlank { null } } },
+            onStatus = { msg ->
+                com.sxplore.app.util.DebugLog.w("Captions", "status: $msg")
+                runOnUiThread { captionStatus = msg.ifBlank { null } }
+            },
         ).also { it.start() }
     }
 

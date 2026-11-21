@@ -21,3 +21,6 @@ add_subdirectory(${WHISPER_SRC} ${CMAKE_BINARY_DIR}/whisper-build)
 
 add_library(whisper_jni SHARED whisper_jni.cpp)
 target_link_libraries(whisper_jni PRIVATE whisper)
+# 16KB page alignment: required by Android 15 devices with 16KB memory pages
+# (still fully compatible with 4KB devices).
+target_link_options(whisper_jni PRIVATE "-Wl,-z,max-page-size=16384")

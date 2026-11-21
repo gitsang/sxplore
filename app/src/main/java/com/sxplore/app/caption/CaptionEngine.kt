@@ -169,7 +169,7 @@ class CaptionEngine(
             // On-device engine: load the ggml model once per run.
             if (config.localModelPath != null) {
                 if (!WhisperLocal.available) {
-                    onStatus("AI subtitles: local engine unsupported on this device (arm64 only)")
+                    onStatus("AI subtitles: local engine unavailable (${WhisperLocal.loadError ?: "unknown error"})")
                     return
                 }
                 onStatus("Loading local Whisper model…")

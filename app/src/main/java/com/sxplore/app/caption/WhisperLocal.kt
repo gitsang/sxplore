@@ -6,11 +6,20 @@ package com.sxplore.app.caption
  */
 object WhisperLocal {
 
+    var loadError: String? = null
+        private set
+
     val available: Boolean by lazy {
         try {
             System.loadLibrary("whisper_jni")
             true
         } catch (e: Throwable) {
+            loadError = e.message ?: e.javaClass.simpleName
+            com.sxplore.app.util.DebugLog.e(
+                "Whisper",
+                "loadLibrary failed | ABIs=${android.os.Build.SUPPORTED_ABIS.joinToString()} | $loadError",
+                e,
+            )
             false
         }
     }
