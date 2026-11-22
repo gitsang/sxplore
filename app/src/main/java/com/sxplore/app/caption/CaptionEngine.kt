@@ -52,23 +52,25 @@ data class CaptionConfig(
 
         /** null when the selected engine is not configured. */
         fun from(s: SettingsStore, localModelPath: String?): CaptionConfig? {
-            val local = s.whisperEngine == "local"
+            val provider = s.asrProvider
+            val local = provider == "local"
             if (local && localModelPath == null) return null
-            val base = normalizeBase(s.whisperBaseUrl)
-            val key = s.whisperApiKey.trim()
+            val base = if (local) "" else normalizeBase(s.effectiveBase("asr", provider))
+            val key = if (local) "" else s.providerKey("asr", provider).trim()
             if (!local && (base.isEmpty() || key.isEmpty())) return null
-            val transBase = normalizeBase(s.translationBaseUrl.ifBlank { s.whisperBaseUrl })
-            val transKey = s.translationApiKey.trim().ifBlank { key }
+            val tProvider = s.transProvider
+            val transBase = normalizeBase(s.effectiveBase("trans", tProvider))
+            val transKey = s.providerKey("trans", tProvider).trim()
             return CaptionConfig(
                 whisperBase = base,
                 whisperKey = key,
-                whisperModel = s.whisperModel.ifBlank { "whisper-1" },
+                whisperModel = s.effectiveModel("asr", provider).ifBlank { "whisper-1" },
                 whisperLanguage = s.whisperLanguage.trim(),
                 translate = s.translationEnabled && transBase.isNotEmpty() && transKey.isNotEmpty(),
                 targetLang = s.translationTargetLang.ifBlank { "Chinese" },
                 transBase = transBase,
                 transKey = transKey,
-                transModel = s.translationModel.ifBlank { "gpt-4o-mini" },
+                transModel = s.effectiveModel("trans", tProvider).ifBlank { "gpt-4o-mini" },
                 localModelPath = if (local) localModelPath else null,
             )
         }

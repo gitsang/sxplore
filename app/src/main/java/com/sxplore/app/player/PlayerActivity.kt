@@ -490,13 +490,13 @@ class PlayerActivity : ComponentActivity() {
         captionStatus = null
         val container = (application as SxploreApp).container
         val settings = container.settings
-        val localPath = if (settings.whisperEngine == "local") {
+        val localPath = if (settings.asrProvider == "local") {
             val name = settings.whisperLocalModel
             if (container.modelDownloader.isReady(name)) {
                 container.modelDownloader.modelFile(name).absolutePath
             } else null
         } else null
-        if (settings.whisperEngine == "local" && localPath == null) {
+        if (settings.asrProvider == "local" && localPath == null) {
             captionStatus = "AI subtitles: download a local Whisper model in Settings"
             return
         }

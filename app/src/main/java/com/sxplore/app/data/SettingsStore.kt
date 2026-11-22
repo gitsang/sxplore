@@ -9,50 +9,61 @@ class SettingsStore(context: Context) {
     private val prefs = context.getSharedPreferences("sxplore_settings", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
 
+    init {
+        // Migrate pre-provider settings (single whisper/translation endpoint)
+        // into the provider scheme once.
+        if (!prefs.contains("asr_provider")) {
+            val oldKey = prefs.getString("whisper_api_key", "") ?: ""
+            val oldBase = prefs.getString("whisper_base_url", "") ?: ""
+            if (oldKey.isNotBlank()) {
+                prefs.edit()
+                    .putString("asr_provider", "custom")
+                    .putString("asr_base_custom", oldBase)
+                    .putString("asr_key_custom", oldKey)
+                    .putString("asr_model_custom", prefs.getString("whisper_model", "") ?: "")
+                    .apply()
+            } else {
+                prefs.edit().putString("asr_provider", "local").apply()
+            }
+        }
+        if (!prefs.contains("trans_provider")) {
+            val oldKey = (prefs.getString("translation_api_key", "") ?: "")
+                .ifBlank { prefs.getString("whisper_api_key", "") ?: "" }
+            val oldBase = (prefs.getString("translation_base_url", "") ?: "")
+                .ifBlank { prefs.getString("whisper_base_url", "") ?: "" }
+            if (oldKey.isNotBlank()) {
+                prefs.edit()
+                    .putString("trans_provider", "custom")
+                    .putString("trans_base_custom", oldBase)
+                    .putString("trans_key_custom", oldKey)
+                    .putString("trans_model_custom", prefs.getString("translation_model", "") ?: "")
+                    .apply()
+            } else {
+                prefs.edit().putString("trans_provider", "openai").apply()
+            }
+        }
+    }
+
+    // ---------- General ----------
+
     var showLiveSpeed: Boolean
         get() = prefs.getBoolean(KEY_LIVE_SPEED, true)
         set(value) {
             prefs.edit().putBoolean(KEY_LIVE_SPEED, value).apply()
         }
 
-    /** Remember open tabs and paths across app restarts. */
     var rememberTabs: Boolean
         get() = prefs.getBoolean("remember_tabs", true)
         set(value) {
             prefs.edit().putBoolean("remember_tabs", value).apply()
         }
 
-    /** Write diagnostic logs to an exportable file. */
-    var debugMode: Boolean
-        get() = prefs.getBoolean("debug_mode", false)
-        set(value) {
-            prefs.edit().putBoolean("debug_mode", value).apply()
-        }
-
-    // ---------- AI live captions (Whisper via OpenAI-compatible API) ----------
+    // ---------- Video / ASR ----------
 
     var aiSubtitlesEnabled: Boolean
         get() = prefs.getBoolean("ai_subs_enabled", false)
         set(value) {
             prefs.edit().putBoolean("ai_subs_enabled", value).apply()
-        }
-
-    var whisperBaseUrl: String
-        get() = prefs.getString("whisper_base_url", "https://api.openai.com") ?: ""
-        set(value) {
-            prefs.edit().putString("whisper_base_url", value).apply()
-        }
-
-    var whisperApiKey: String
-        get() = prefs.getString("whisper_api_key", "") ?: ""
-        set(value) {
-            prefs.edit().putString("whisper_api_key", value).apply()
-        }
-
-    var whisperModel: String
-        get() = prefs.getString("whisper_model", "whisper-1") ?: "whisper-1"
-        set(value) {
-            prefs.edit().putString("whisper_model", value).apply()
         }
 
     /** Recognition language hint; blank = auto-detect. */
@@ -62,11 +73,11 @@ class SettingsStore(context: Context) {
             prefs.edit().putString("whisper_language", value).apply()
         }
 
-    /** Recognition engine: "api" (OpenAI-compatible) or "local" (whisper.cpp). */
-    var whisperEngine: String
-        get() = prefs.getString("whisper_engine", "api") ?: "api"
+    /** ASR provider id: local / openai / siliconflow / groq / custom. */
+    var asrProvider: String
+        get() = prefs.getString("asr_provider", "local") ?: "local"
         set(value) {
-            prefs.edit().putString("whisper_engine", value).apply()
+            prefs.edit().putString("asr_provider", value).apply()
         }
 
     /** Selected local model: tiny / base / small. */
@@ -83,7 +94,7 @@ class SettingsStore(context: Context) {
             prefs.edit().putString("model_download_source", value).apply()
         }
 
-    // ---------- Translation (OpenAI-compatible chat API) ----------
+    // ---------- Video / Translation ----------
 
     var translationEnabled: Boolean
         get() = prefs.getBoolean("translation_enabled", true)
@@ -97,23 +108,57 @@ class SettingsStore(context: Context) {
             prefs.edit().putString("translation_target_lang", value).apply()
         }
 
-    /** Blank = reuse the Whisper base URL / key. */
-    var translationBaseUrl: String
-        get() = prefs.getString("translation_base_url", "") ?: ""
+    /** Translation provider id: openai / siliconflow / deepseek / custom. */
+    var transProvider: String
+        get() = prefs.getString("trans_provider", "openai") ?: "openai"
         set(value) {
-            prefs.edit().putString("translation_base_url", value).apply()
+            prefs.edit().putString("trans_provider", value).apply()
         }
 
-    var translationApiKey: String
-        get() = prefs.getString("translation_api_key", "") ?: ""
+    // ---------- Per-provider fields (scope = "asr" | "trans") ----------
+
+    fun providerBase(scope: String, provider: String): String =
+        prefs.getString("${scope}_base_$provider", "") ?: ""
+
+    fun setProviderBase(scope: String, provider: String, value: String) {
+        prefs.edit().putString("${scope}_base_$provider", value).apply()
+    }
+
+    fun providerKey(scope: String, provider: String): String =
+        prefs.getString("${scope}_key_$provider", "") ?: ""
+
+    fun setProviderKey(scope: String, provider: String, value: String) {
+        prefs.edit().putString("${scope}_key_$provider", value).apply()
+    }
+
+    fun providerModel(scope: String, provider: String): String =
+        prefs.getString("${scope}_model_$provider", "") ?: ""
+
+    fun setProviderModel(scope: String, provider: String, value: String) {
+        prefs.edit().putString("${scope}_model_$provider", value).apply()
+    }
+
+    /** Blank base URL falls back to the provider's default. */
+    fun effectiveBase(scope: String, provider: String): String =
+        providerBase(scope, provider).trim().ifBlank { Providers.byId(provider)?.defaultBase ?: "" }
+
+    /** Blank model falls back to the provider's default. */
+    fun effectiveModel(scope: String, provider: String): String =
+        providerModel(scope, provider).trim().ifBlank { Providers.defaultModel(scope, provider) }
+
+    // ---------- Developer ----------
+
+    var debugMode: Boolean
+        get() = prefs.getBoolean("debug_mode", false)
         set(value) {
-            prefs.edit().putString("translation_api_key", value).apply()
+            prefs.edit().putBoolean("debug_mode", value).apply()
         }
 
-    var translationModel: String
-        get() = prefs.getString("translation_model", "gpt-4o-mini") ?: "gpt-4o-mini"
+    /** Clear diagnostic logs when the app exits. */
+    var cleanLogsOnClose: Boolean
+        get() = prefs.getBoolean("clean_logs_on_close", false)
         set(value) {
-            prefs.edit().putString("translation_model", value).apply()
+            prefs.edit().putBoolean("clean_logs_on_close", value).apply()
         }
 
     // ---------- Tab persistence ----------

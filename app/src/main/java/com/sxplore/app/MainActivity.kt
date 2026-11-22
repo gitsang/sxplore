@@ -58,6 +58,16 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onDestroy() {
+        if (isFinishing) {
+            val settings = (application as SxploreApp).container.settings
+            if (settings.cleanLogsOnClose) {
+                com.sxplore.app.util.DebugLog.clear()
+            }
+        }
+        super.onDestroy()
+    }
 }
 
 private fun hasStoragePermission(ctx: Context): Boolean =
