@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -30,6 +32,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 
 data class TabUiState(
     val id: Long,
@@ -332,12 +336,86 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * where the user switches methods.
      */
     fun openFile(index: Int, e: VfsEntry) {
+        if (e.name.substringAfterLast('.', "").equals("apk", ignoreCase = true)) {
+            installApk(index, e)
+            return
+        }
         val kind = StreamProxy.kindOf(e.name)
         val internal = container.settings.openInternally(kind)
         when (kind) {
             "video", "audio" -> if (internal) playInternal(index, e) else playExternal(index, e)
             "image" -> if (internal) previewImage(index, e) else playExternal(index, e)
             else -> playExternal(index, e)
+        }
+    }
+
+    /**
+     * APK install flow. The system package installer only accepts content://
+     * URIs (not our http proxy), and needs the full file to parse the package:
+     * local APKs install directly; SMB APKs are downloaded to cache first
+     * (with progress), then installed via FileProvider.
+     */
+    fun installApk(index: Int, e: VfsEntry) {
+        val ctx = getApplication<Application>()
+        if (Build.VERSION.SDK_INT >= 26 && !ctx.packageManager.canRequestPackageInstalls()) {
+            snackbar = "Allow 'install unknown apps' for Sxplore, then tap the APK again"
+            runCatching {
+                ctx.startActivity(
+                    Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${ctx.packageName}"))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+            return
+        }
+        val tab = tabs.getOrNull(index) ?: return
+        when (val vfs = tab.vfs) {
+            is LocalVfs -> launchInstall(
+                FileProvider.getUriForFile(ctx, ctx.packageName + ".fileprovider", vfs.realFile(e.path))
+            )
+            is SmbVfs -> viewModelScope.launch {
+                transfer = TransferProgress("Preparing APK…", 0, e.size)
+                try {
+                    val dir = File(ctx.cacheDir, "apk-install").apply { mkdirs() }
+                    dir.listFiles()?.forEach { it.delete() }
+                    val target = File(dir, e.name)
+                    withContext(Dispatchers.IO) {
+                        vfs.openRandomAccess(e.path).use { ra ->
+                            FileOutputStream(target).use { out ->
+                                val buf = ByteArray(1024 * 1024)
+                                var pos = 0L
+                                while (pos < e.size) {
+                                    val n = ra.readAt(pos, buf, 0, minOf(buf.size.toLong(), e.size - pos).toInt())
+                                    if (n <= 0) break
+                                    out.write(buf, 0, n)
+                                    pos += n
+                                    transfer = TransferProgress("Preparing APK…", pos, e.size)
+                                }
+                            }
+                        }
+                    }
+                    launchInstall(
+                        FileProvider.getUriForFile(ctx, ctx.packageName + ".fileprovider", target)
+                    )
+                } catch (ex: Exception) {
+                    snackbar = "APK download failed: ${ex.message}"
+                } finally {
+                    transfer = null
+                }
+            }
+            else -> snackbar = "Unsupported source"
+        }
+    }
+
+    private fun launchInstall(uri: Uri) {
+        val ctx = getApplication<Application>()
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            ctx.startActivity(intent)
+        } catch (ex: Exception) {
+            snackbar = "Cannot start installer: ${ex.message}"
         }
     }
 

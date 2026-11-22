@@ -203,6 +203,7 @@ fun AppRoot(vm: AppViewModel) {
             onRename = { vm.fileAction = null; vm.renameTarget = idx to e },
             onDelete = { vm.fileAction = null; vm.deleteTarget = idx to e },
             onInfo = { vm.fileAction = null; vm.infoTarget = e },
+            onInstall = { vm.fileAction = null; vm.installApk(idx, e) },
         )
     }
     vm.dirAction?.let { (idx, e) ->

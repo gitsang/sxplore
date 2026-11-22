@@ -199,6 +199,7 @@ fun FileActionsDialog(
     onRename: () -> Unit,
     onDelete: () -> Unit,
     onInfo: () -> Unit,
+    onInstall: () -> Unit,
 ) {
     val kind = StreamProxy.kindOf(entry.name)
     AlertDialog(
@@ -216,6 +217,9 @@ fun FileActionsDialog(
                         ActionItem("↗ Open with another app", onPlayExternal)
                     }
                     else -> {
+                        if (entry.name.substringAfterLast('.', "").equals("apk", ignoreCase = true)) {
+                            ActionItem("Install", onInstall)
+                        }
                         ActionItem("↗ Open with another app", onPlayExternal)
                     }
                 }
