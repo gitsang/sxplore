@@ -47,7 +47,11 @@ Java_com_sxplore_app_caption_WhisperLocal_transcribe(JNIEnv *env, jobject /*thiz
     env->ReleaseStringUTFChars(language, lang);
 
     std::string out;
-    if (rc == 0) {
+    if (rc != 0) {
+        out = "ERR:" + std::to_string(rc) + "\n";
+        return env->NewStringUTF(out.c_str());
+    }
+    {
         int ns = whisper_full_n_segments(ctx);
         for (int i = 0; i < ns; i++) {
             int64_t t0 = whisper_full_get_segment_t0(ctx, i) * 10; // centiseconds -> ms

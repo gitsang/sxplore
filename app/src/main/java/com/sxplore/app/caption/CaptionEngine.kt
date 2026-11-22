@@ -152,6 +152,10 @@ class CaptionEngine(
             extractor.selectTrack(audioTrack)
             val format = extractor.getTrackFormat(audioTrack)
             val mime = format.getString(MediaFormat.KEY_MIME)!!
+            com.sxplore.app.util.DebugLog.d(
+                "Captions",
+                "audio track: $mime rate=${format.getInteger(MediaFormat.KEY_SAMPLE_RATE)} ch=${format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)} startMs=$startMs local=${config.localModelPath != null}",
+            )
             if (format.containsKey(MediaFormat.KEY_PCM_ENCODING) &&
                 format.getInteger(MediaFormat.KEY_PCM_ENCODING) == AudioFormat.ENCODING_PCM_FLOAT
             ) {
@@ -187,12 +191,18 @@ class CaptionEngine(
             var chunkStartMs = startMs
             var gotFirstPts = false
             var eosInput = false
+            var aheadLogged = false
+            var firstPcmLogged = false
 
             while (!cancelled) {
                 // Pace: stay at most ~60s ahead of playback to bound API cost
                 // and bandwidth on slow links. (16kHz mono 16-bit = 32 bytes/ms)
                 val aheadMs = chunkStartMs + pcm.size() / 32 - playbackPositionMs()
                 if (aheadMs > 60_000) {
+                    if (!aheadLogged) {
+                        com.sxplore.app.util.DebugLog.d("Captions", "running ${aheadMs}ms ahead of playback, waiting")
+                        aheadLogged = true
+                    }
                     Thread.sleep(500)
                     continue
                 }
@@ -218,6 +228,10 @@ class CaptionEngine(
                         if (!gotFirstPts) {
                             chunkStartMs = info.presentationTimeUs / 1000
                             gotFirstPts = true
+                        }
+                        if (!firstPcmLogged) {
+                            com.sxplore.app.util.DebugLog.d("Captions", "first PCM pts=${info.presentationTimeUs / 1000}ms size=${info.size}")
+                            firstPcmLogged = true
                         }
                         val out = codec.getOutputBuffer(outIdx)!!
                         val bytes = ByteArray(info.size)
@@ -259,6 +273,7 @@ class CaptionEngine(
 
     /** Recognize one chunk (local whisper.cpp or Whisper API), optionally translate, publish cues. */
     private fun flushChunk(pcm: ByteArray, chunkStartMs: Long) {
+        com.sxplore.app.util.DebugLog.d("Captions", "chunk flush: ${pcm.size}B @${chunkStartMs}ms")
         data class Line(val text: String, val startSec: Double, val endSec: Double)
         val lines = ArrayList<Line>()
 
@@ -267,19 +282,28 @@ class CaptionEngine(
             val floats = FloatArray(pcm.size / 2)
             val bb = ByteBuffer.wrap(pcm).order(ByteOrder.LITTLE_ENDIAN)
             for (i in floats.indices) floats[i] = bb.getShort(i * 2) / 32768f
+            val t0 = System.currentTimeMillis()
             val result = WhisperLocal.transcribe(
                 whisperCtx, floats, config.whisperLanguage, WhisperLocal.defaultThreads(),
             )
+            if (result.startsWith("ERR:")) {
+                com.sxplore.app.util.DebugLog.e("Captions", "whisper_full failed: $result")
+                return
+            }
             result.lines().forEach { line ->
                 if (line.isBlank()) return@forEach
                 val parts = line.split('\t')
                 if (parts.size >= 3) {
-                    val t0 = parts[0].toLongOrNull() ?: return@forEach
-                    val t1 = parts[1].toLongOrNull() ?: return@forEach
+                    val ts0 = parts[0].toLongOrNull() ?: return@forEach
+                    val ts1 = parts[1].toLongOrNull() ?: return@forEach
                     val text = parts.subList(2, parts.size).joinToString(" ").trim()
-                    if (text.isNotEmpty()) lines.add(Line(text, t0 / 1000.0, t1 / 1000.0))
+                    if (text.isNotEmpty()) lines.add(Line(text, ts0 / 1000.0, ts1 / 1000.0))
                 }
             }
+            com.sxplore.app.util.DebugLog.d(
+                "Captions",
+                "whisper: ${lines.size} lines in ${System.currentTimeMillis() - t0}ms (raw ${result.length} chars)",
+            )
         } else {
             // ---- Whisper API ----
             val wav = wavBytes(pcm)
@@ -326,6 +350,10 @@ class CaptionEngine(
             )
         }
         cues.addAll(newCues)
+        com.sxplore.app.util.DebugLog.d(
+            "Captions",
+            "cues +${newCues.size}: ${newCues.first().startMs}..${newCues.last().endMs}ms | \"${newCues.first().text.take(40)}\"",
+        )
         onCues(cues.toList())
     }
 

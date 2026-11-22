@@ -124,6 +124,7 @@ class PlayerActivity : ComponentActivity() {
     // ExoPlayer must only be touched on the main thread; the caption worker
     // reads this cached position instead (updated by the main-thread poller).
     @Volatile private var cachedPositionMs: Long = 0L
+    private var lastCueCount = -1
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -243,7 +244,15 @@ class PlayerActivity : ComponentActivity() {
                     }
                     val pos = player?.currentPosition ?: 0L
                     cachedPositionMs = pos
-                    displayedCue = captionCues.lastOrNull { pos >= it.startMs && pos <= it.endMs + 1500 }
+                    val cue = captionCues.lastOrNull { pos >= it.startMs && pos <= it.endMs + 1500 }
+                    if (cue != displayedCue || captionCues.size != lastCueCount) {
+                        com.sxplore.app.util.DebugLog.d(
+                            "Captions",
+                            "ui: cues=${captionCues.size} pos=${pos}ms showing=${cue != null}",
+                        )
+                        lastCueCount = captionCues.size
+                    }
+                    displayedCue = cue
                     delay(500)
                 }
             }
