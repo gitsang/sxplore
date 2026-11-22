@@ -193,6 +193,7 @@ class CaptionEngine(
             var eosInput = false
             var aheadLogged = false
             var firstPcmLogged = false
+            var slowHintShown = false
 
             while (!cancelled) {
                 // Pace: stay at most ~60s ahead of playback to bound API cost
@@ -304,6 +305,11 @@ class CaptionEngine(
                 "Captions",
                 "whisper: ${lines.size} lines in ${System.currentTimeMillis() - t0}ms (raw ${result.length} chars)",
             )
+            val inferMs = System.currentTimeMillis() - t0
+            if (!slowHintShown && inferMs > pcm.size / 32) {
+                slowHintShown = true
+                onStatus("Local model is slower than real-time (${inferMs / 1000}s per ${pcm.size / 32000}s chunk) — Tiny model recommended")
+            }
         } else {
             // ---- Whisper API ----
             val wav = wavBytes(pcm)

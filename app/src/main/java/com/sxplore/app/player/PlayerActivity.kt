@@ -244,7 +244,11 @@ class PlayerActivity : ComponentActivity() {
                     }
                     val pos = player?.currentPosition ?: 0L
                     cachedPositionMs = pos
-                    val cue = captionCues.lastOrNull { pos >= it.startMs && pos <= it.endMs + 1500 }
+                    // Live-caption style: show the latest cue that has started
+                    // and keep it until a newer one starts. Strict window
+                    // matching showed nothing when inference is slower than
+                    // real-time (cues arrive after their window has passed).
+                    val cue = captionCues.lastOrNull { it.startMs <= pos + 300 }
                     if (cue != displayedCue || captionCues.size != lastCueCount) {
                         com.sxplore.app.util.DebugLog.d(
                             "Captions",
