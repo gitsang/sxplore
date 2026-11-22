@@ -101,6 +101,7 @@ class CaptionEngine(
     @Volatile private var cancelled = false
     private var thread: Thread? = null
     private var whisperCtx: Long = 0L
+    @Volatile private var slowHintShown = false
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
@@ -193,7 +194,6 @@ class CaptionEngine(
             var eosInput = false
             var aheadLogged = false
             var firstPcmLogged = false
-            var slowHintShown = false
 
             while (!cancelled) {
                 // Pace: stay at most ~60s ahead of playback to bound API cost
