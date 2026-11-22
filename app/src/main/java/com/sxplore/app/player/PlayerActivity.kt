@@ -121,6 +121,10 @@ class PlayerActivity : ComponentActivity() {
     private var captionStatus by mutableStateOf<String?>(null)
     private var captionEngine: CaptionEngine? = null
 
+    // ExoPlayer must only be touched on the main thread; the caption worker
+    // reads this cached position instead (updated by the main-thread poller).
+    @Volatile private var cachedPositionMs: Long = 0L
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -238,6 +242,7 @@ class PlayerActivity : ComponentActivity() {
                         player?.let { updateStartProgress(it) }
                     }
                     val pos = player?.currentPosition ?: 0L
+                    cachedPositionMs = pos
                     displayedCue = captionCues.lastOrNull { pos >= it.startMs && pos <= it.endMs + 1500 }
                     delay(500)
                 }
@@ -488,11 +493,12 @@ class PlayerActivity : ComponentActivity() {
             return
         }
         val url = urls.getOrElse(p.currentMediaItemIndex) { return }
+        cachedPositionMs = p.currentPosition
         captionEngine = CaptionEngine(
             url = url,
             startMs = p.currentPosition.coerceAtLeast(0L),
             config = config,
-            playbackPositionMs = { player?.currentPosition ?: 0L },
+            playbackPositionMs = { cachedPositionMs },
             onCues = { cues -> runOnUiThread { captionCues = cues } },
             onStatus = { msg ->
                 com.sxplore.app.util.DebugLog.w("Captions", "status: $msg")
